@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BLE Sense Test Station</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Teaching Kit Check</p>
+        <h1>BLE Sense Test Station <span id="appVersion" class="version-pill">v0.9</span></h1>
+        <p class="intro">One local page for setup, upload and sensor verification. Plug in a board, choose its port and run the test.</p>
+      </div>
+      <div class="hero-status">
+        <div class="metric">
+          <span class="metric-label">Task</span>
+          <strong id="currentTask">Idle</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Snapshots</span>
+          <strong id="snapshotCount">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Last data</span>
+          <strong id="lastDataAt">None</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Detected revision</span>
+          <strong id="detectedRevision">Unknown</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Quick Start</h2>
+        <p id="statusText">Checking local setup.</p>
+      </div>
+      <div class="controls-grid">
+        <label class="field">
+          <span>Board port</span>
+          <select id="portSelect"></select>
+        </label>
+        <button id="refreshPortsButton" type="button">Refresh Ports</button>
+        <button id="runFullTestButton" type="button" class="primary">Prepare, Upload and Start Test</button>
+        <button id="uploadButton" type="button">Upload Only</button>
+        <button id="connectButton" type="button">Connect Live Data</button>
+        <button id="disconnectButton" type="button">Disconnect</button>
+        <button id="setupButton" type="button">Prepare Arduino Tools</button>
+        <button id="installPyserialButton" type="button">Install pyserial</button>
+      </div>
+      <div class="hint-grid">
+        <article class="hint-card">
+          <h3>Arduino CLI</h3>
+          <p id="arduinoCliStatus">Checking...</p>
+          <p id="arduinoCliHelp" class="small"></p>
+        </article>
+        <article class="hint-card">
+          <h3>pyserial</h3>
+          <p id="pyserialStatus">Checking...</p>
+          <p id="pyserialHelp" class="small"></p>
+        </article>
+        <article class="hint-card">
+          <h3>Sketch</h3>
+          <p id="sketchStatus">Checking...</p>
+          <p class="small">Expected sketch: <code>sense_table_stream</code></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Test Summary</h2>
+        <p>Immediate sensor status for the connected board.</p>
+      </div>
+      <div id="summaryCards" class="summary-grid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Sensor Results</h2>
+        <p>Green means verified, amber means more interaction is needed, red means data is missing.</p>
+      </div>
+      <table class="sensor-table">
+        <thead>
+          <tr>
+            <th>Sensor</th>
+            <th>Model</th>
+            <th>Status</th>
+            <th>Live value</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="sensorRows"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Activity Log</h2>
+        <p>Recent actions and errors from the local runner.</p>
+      </div>
+      <details class="log-accordion">
+        <summary>Open activity log</summary>
+        <div id="logLines" class="log-panel"></div>
+      </details>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

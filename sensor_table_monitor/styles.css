@@ -1,0 +1,378 @@
+:root {
+  --bg: #f5efe4;
+  --panel: rgba(255, 252, 245, 0.92);
+  --line: #d8cab1;
+  --ink: #1f1a14;
+  --muted: #655847;
+  --accent: #0b6e4f;
+  --accent-strong: #084c38;
+  --warning: #b76a10;
+  --danger: #a33434;
+  --shadow: 0 18px 40px rgba(62, 44, 22, 0.12);
+}
+
+html {
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 30%),
+    linear-gradient(180deg, #efe6d6 0%, var(--bg) 45%, #ece3d3 100%);
+}
+
+.page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 20px 40px;
+}
+
+.hero,
+.panel {
+  border: 1px solid rgba(122, 96, 62, 0.18);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 20px;
+  padding: 28px;
+  margin-bottom: 18px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 10px;
+  font-size: clamp(2rem, 4vw, 3.6rem);
+  line-height: 0.95;
+}
+
+.version-pill {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(11, 110, 79, 0.12);
+  color: var(--accent-strong);
+  font-size: 0.95rem;
+  vertical-align: middle;
+}
+
+.intro {
+  max-width: 62ch;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.hero-status,
+.summary-grid,
+.hint-grid,
+.controls-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.hero-status {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.metric,
+.hint-card,
+.summary-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 249, 239, 0.85);
+  padding: 16px;
+}
+
+.metric-label,
+.small {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.metric strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 1.05rem;
+}
+
+.panel {
+  padding: 22px;
+  margin-bottom: 18px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: end;
+  margin-bottom: 14px;
+}
+
+.controls-grid {
+  grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(160px, 1fr));
+  margin-bottom: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+button,
+select {
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid #b8a58a;
+  background: #fffaf0;
+  color: var(--ink);
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+button:hover:enabled {
+  transform: translateY(-1px);
+  background: #fff;
+}
+
+button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+button.primary:hover:enabled {
+  background: var(--accent-strong);
+}
+
+button:disabled,
+select:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.hint-grid,
+.summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.hint-card p,
+.small,
+code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.summary-card strong {
+  display: block;
+  font-size: 2rem;
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.summary-card.ok strong {
+  color: var(--accent);
+}
+
+.summary-card.attention strong {
+  color: var(--warning);
+}
+
+.summary-card.problem strong {
+  color: var(--danger);
+}
+
+.sensor-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.sensor-table th,
+.sensor-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.sensor-table th {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.sensor-table td {
+  font-size: 0.96rem;
+}
+
+.value-cell {
+  font-family: "Consolas", "SFMono-Regular", monospace;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.status-ok {
+  background: rgba(11, 110, 79, 0.12);
+  color: var(--accent-strong);
+}
+
+.status-needs-action {
+  background: rgba(183, 106, 16, 0.12);
+  color: var(--warning);
+}
+
+.status-problem {
+  background: rgba(163, 52, 52, 0.12);
+  color: var(--danger);
+}
+
+.status-waiting {
+  background: rgba(101, 88, 71, 0.12);
+  color: var(--muted);
+}
+
+.log-panel {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #fffdf8;
+}
+
+.log-accordion summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--accent-strong);
+  list-style: none;
+}
+
+.log-accordion summary::-webkit-details-marker {
+  display: none;
+}
+
+.log-accordion summary::before {
+  content: "+";
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.log-accordion[open] summary::before {
+  content: "-";
+}
+
+.log-accordion[open] .log-panel {
+  margin-top: 12px;
+}
+
+.status-live {
+  position: relative;
+  padding-left: 18px;
+}
+
+.status-live::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translateY(-50%);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    opacity: 0.35;
+    box-shadow: 0 0 0 0 rgba(11, 110, 79, 0.35);
+  }
+  70% {
+    opacity: 1;
+    box-shadow: 0 0 0 10px rgba(11, 110, 79, 0);
+  }
+  100% {
+    opacity: 0.35;
+    box-shadow: 0 0 0 0 rgba(11, 110, 79, 0);
+  }
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 150px 90px 1fr;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(216, 202, 177, 0.65);
+  font-size: 0.92rem;
+}
+
+.log-line:last-child {
+  border-bottom: 0;
+}
+
+.log-line time,
+.log-line .level {
+  color: var(--muted);
+}
+
+code {
+  font-family: "Consolas", "SFMono-Regular", monospace;
+}
+
+@media (max-width: 900px) {
+  .hero,
+  .controls-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-status {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-head {
+    display: block;
+  }
+
+  .log-line {
+    grid-template-columns: 1fr;
+  }
+}
