@@ -6,7 +6,7 @@ This repository is now arranged so a teaching assistant can start one local tool
 
 ## Intended flow
 
-1. Download or clone the repository.
+1. Clone the repository to the machine you want to use in the lab.
 2. Start the launcher:
    - Windows: `LaunchSensorTableMonitor.cmd`
    - macOS: `LaunchSensorTableMonitor.command`
@@ -33,6 +33,19 @@ The local runner will:
 - `Needs action`: the sensor likely works, but the TA still needs to interact with it, such as waving over the gesture sensor or clapping near the microphone
 - `Problem`: the runner expected data but did not get any
 - `Waiting`: the board is not streaming yet
+
+## Moving to another lab machine
+
+If you want to continue from another computer:
+
+1. Clone the repo on that machine:
+   - `git clone https://github.com/k3larra/ble-sense-test-station.git`
+2. Enter the folder:
+   - `cd ble-sense-test-station`
+3. Start the launcher there.
+4. If needed, install Python 3, `arduino-cli`, and `pyserial` on that machine.
+
+Your test records and any local Python environment are machine-local, so they are not included in the repo by default.
 
 ## Tool requirements
 
