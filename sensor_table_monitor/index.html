@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BLE Sense Test Station</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Teaching Kit Check</p>
+        <h1>BLE Sense Batch Test Station <span id="appVersion" class="version-pill">v1.0</span></h1>
+        <p class="intro">A standalone operator workflow for batch testing BLE Sense teaching kits, saving results, and exporting a report.</p>
+      </div>
+      <div class="hero-status">
+        <div class="metric">
+          <span class="metric-label">Task</span>
+          <strong id="currentTask">Idle</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Snapshots</span>
+          <strong id="snapshotCount">0</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Last data</span>
+          <strong id="lastDataAt">None</strong>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Detected revision</span>
+          <strong id="detectedRevision">Unknown</strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Operator Session</h2>
+        <p id="statusText">Checking local setup.</p>
+      </div>
+      <div class="controls-grid operator-grid">
+        <label class="field">
+          <span>Inventory number</span>
+          <input id="inventoryIdInput" type="text" placeholder="For example KIT-001">
+        </label>
+        <label class="field">
+          <span>Operator</span>
+          <input id="operatorInput" type="text" placeholder="Name or initials">
+        </label>
+        <label class="field field-wide">
+          <span>Notes</span>
+          <textarea id="notesInput" rows="2" placeholder="Optional notes about this kit"></textarea>
+        </label>
+        <button id="saveSessionButton" type="button">Save Session Details</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Quick Start</h2>
+        <p>Plug in a board, choose the port, then run the full test.</p>
+      </div>
+      <div class="controls-grid">
+        <label class="field">
+          <span>Board port</span>
+          <select id="portSelect"></select>
+        </label>
+        <button id="refreshPortsButton" type="button">Refresh Ports</button>
+        <button id="runFullTestButton" type="button" class="primary">Prepare, Upload and Start Test</button>
+        <button id="uploadButton" type="button">Upload Only</button>
+        <button id="connectButton" type="button">Connect Live Data</button>
+        <button id="disconnectButton" type="button">Disconnect</button>
+        <button id="setupButton" type="button">Prepare Arduino Tools</button>
+        <button id="installPyserialButton" type="button">Install pyserial</button>
+      </div>
+      <div class="hint-grid">
+        <article class="hint-card">
+          <h3>Arduino CLI</h3>
+          <p id="arduinoCliStatus">Checking...</p>
+          <p id="arduinoCliHelp" class="small"></p>
+        </article>
+        <article class="hint-card">
+          <h3>pyserial</h3>
+          <p id="pyserialStatus">Checking...</p>
+          <p id="pyserialHelp" class="small"></p>
+        </article>
+        <article class="hint-card">
+          <h3>Sketch</h3>
+          <p id="sketchStatus">Checking...</p>
+          <p class="small">Expected sketch: <code>sense_table_stream</code></p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Kit Checklist</h2>
+        <p>Tick the kit contents before saving the final result.</p>
+      </div>
+      <div id="checklistGrid" class="checklist-grid"></div>
+      <div class="controls-grid compact-actions">
+        <button id="saveResultButton" type="button" class="primary">Save Result For This Kit</button>
+        <button id="nextBoardButton" type="button">Reset For Next Kit</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Batch Summary</h2>
+        <p>Running totals for this batch and where the report files are saved.</p>
+      </div>
+      <div id="historySummaryCards" class="summary-grid"></div>
+      <div class="file-list small">
+        <div>JSON report: <code id="jsonPath">-</code></div>
+        <div>CSV report: <code id="csvPath">-</code></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Test Summary</h2>
+        <p>Immediate sensor status for the connected board.</p>
+      </div>
+      <div id="summaryCards" class="summary-grid"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Sensor Results</h2>
+        <p>Green means verified, amber means more interaction is needed, red means data is missing.</p>
+      </div>
+      <table class="sensor-table">
+        <thead>
+          <tr>
+            <th>Sensor</th>
+            <th>Model</th>
+            <th>Status</th>
+            <th>Live value</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody id="sensorRows"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Recent Saved Results</h2>
+        <p>The latest kits recorded in this batch.</p>
+      </div>
+      <table class="sensor-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Inventory</th>
+            <th>Result</th>
+            <th>Revision</th>
+            <th>Missing kit items</th>
+          </tr>
+        </thead>
+        <tbody id="recentTestsRows"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Activity Log</h2>
+        <p>Recent actions and errors from the local runner.</p>
+      </div>
+      <details class="log-accordion">
+        <summary>Open activity log</summary>
+        <div id="logLines" class="log-panel"></div>
+      </details>
+    </section>
+  </main>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
