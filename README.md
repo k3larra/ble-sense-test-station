@@ -1,6 +1,6 @@
 # BLE Sense Test Station
 
-Version: `0.9`
+Version: `1.2`
 
 This repository is now arranged so a teaching assistant can start one local tool instead of juggling Arduino IDE, Arduino CLI and a browser serial session.
 
@@ -11,9 +11,19 @@ This repository is now arranged so a teaching assistant can start one local tool
    - Windows: `LaunchSensorTableMonitor.cmd`
    - macOS: `LaunchSensorTableMonitor.command`
    - Any platform with Python: `python ble_sense_test_station.py`
-3. Plug in an Arduino Nano 33 BLE Sense.
-4. In the page that opens, choose the detected serial port.
-5. Click `Prepare, Upload and Start Test`.
+3. If this is a new batch and no kit records exist yet, fill in the test metadata:
+   - test name
+   - test responsible
+   - test notes
+4. Fill in the kit details:
+   - kit number
+   - kit name
+   - operator
+   - kit notes
+5. Tick the kit checklist items that are present.
+6. Plug in an Arduino Nano 33 BLE Sense and choose the detected serial port.
+7. Tick the Arduino checklist row if the Arduino should be tested as part of the save step.
+8. Click `Run test and save results`.
 
 The local runner will:
 
@@ -25,7 +35,27 @@ The local runner will:
 - use the `PDM` support that comes with the Nano 33 BLE core instead of trying to install it as a separate library
 - compile and upload `sense_table_stream`
 - reconnect to the board and read live JSON sensor data
+- automatically check the Arduino checklist row once the Arduino test has run
+- save the board hardware ID when the board or serial port exposes one
+- prevent the same saved hardware ID from being used by another kit in the same batch
 - show which sensors are verified, which need interaction, and which appear broken
+- save the kit result to local JSON and CSV reports
+
+You can also click `Test Arduino` to run only the Arduino upload/connect test without saving the kit result.
+
+The `Reset` button clears the current kit details, checklist, live sensor state and edit state. It does not delete previously saved result files.
+
+## Test metadata and reports
+
+Saved test data is stored in `test_records/` on the local machine:
+
+- `test_metadata.json`: batch-level test name, responsible person, notes and saved date
+- `board_tests.json`: full saved kit records
+- `board_tests.csv`: spreadsheet-friendly saved kit summary
+
+The metadata form is shown when no kit records exist and metadata has not been saved yet. Once saved, the metadata is visible in the UI and can be edited with `Edit Test Metadata`.
+
+Test records and metadata are machine-local and are not included in the repo by default.
 
 ## What the status colors mean
 
@@ -45,7 +75,7 @@ If you want to continue from another computer:
 3. Start the launcher there.
 4. If needed, install Python 3, `arduino-cli`, and `pyserial` on that machine.
 
-Your test records and any local Python environment are machine-local, so they are not included in the repo by default.
+Your test records, test metadata and any local Python environment are machine-local, so they are not included in the repo by default.
 
 ## Tool requirements
 

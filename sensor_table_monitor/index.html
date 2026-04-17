@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BLE Sense Test Station</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260417-6">
 </head>
 <body>
   <main class="page">
@@ -34,15 +34,61 @@
       </div>
     </section>
 
+    <section class="panel" id="testMetadataPanel">
+      <div class="panel-head">
+        <h2>Test Metadata</h2>
+        <p id="testMetadataPrompt">Save the test details before recording the first kit.</p>
+      </div>
+      <div id="testMetadataSummary" class="metadata-summary" hidden>
+        <div>
+          <span class="metric-label">Test name</span>
+          <strong id="testNameValue">-</strong>
+        </div>
+        <div>
+          <span class="metric-label">Test responsible</span>
+          <strong id="testResponsibleValue">-</strong>
+        </div>
+        <div>
+          <span class="metric-label">Saved date</span>
+          <strong id="testSavedAtValue">-</strong>
+        </div>
+        <div class="metadata-notes">
+          <span class="metric-label">Notes</span>
+          <p id="testNotesValue">-</p>
+        </div>
+        <button id="editTestMetadataButton" type="button">Edit Test Metadata</button>
+      </div>
+      <div id="testMetadataForm" class="controls-grid operator-grid">
+        <label class="field">
+          <span>Test name</span>
+          <input id="testNameInput" type="text" placeholder="For example Spring workshop kit check">
+        </label>
+        <label class="field">
+          <span>Test responsible</span>
+          <input id="testResponsibleInput" type="text" placeholder="Name or initials">
+        </label>
+        <label class="field field-wide">
+          <span>Notes</span>
+          <textarea id="testMetadataNotesInput" rows="2" placeholder="Optional notes for this test"></textarea>
+        </label>
+        <button id="saveTestMetadataButton" type="button" class="primary">Save Test Metadata</button>
+        <button id="cancelTestMetadataEditButton" type="button">Cancel</button>
+      </div>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
-        <h2>Operator Session</h2>
+        <h2>Kit Details and Checklist</h2>
         <p id="statusText">Checking local setup.</p>
       </div>
-      <div class="controls-grid operator-grid">
+      <div class="controls-grid operator-grid kit-details-grid">
         <label class="field">
-          <span>Inventory number</span>
-          <input id="inventoryIdInput" type="text" placeholder="For example KIT-001">
+          <span>Kit number</span>
+          <input id="inventoryIdInput" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="For example 1">
+        </label>
+        <label class="field">
+          <span>Kit name</span>
+          <input id="inventoryNameInput" type="text" placeholder="For example Group A board">
         </label>
         <label class="field">
           <span>Operator</span>
@@ -52,14 +98,59 @@
           <span>Notes</span>
           <textarea id="notesInput" rows="2" placeholder="Optional notes about this kit"></textarea>
         </label>
-        <button id="saveSessionButton" type="button">Save Session Details</button>
+      </div>
+      <div id="checklistGrid" class="checklist-grid">
+        <label class="check-item">
+          <input type="checkbox" data-label="1 Arduino Nano 33 BLE Sense with headers">
+          <span>1 Arduino Nano 33 BLE Sense with headers</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="1 Breadboard">
+          <span>1 Breadboard</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="20 Connection wires">
+          <span>20 Connection wires</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="1 potentiometer / trimmer">
+          <span>1 potentiometer / trimmer</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="3 buttons / tactile switches">
+          <span>3 buttons / tactile switches</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="1 LED ring or stripe">
+          <span>1 LED ring or stripe</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="1 micro servo motor">
+          <span>1 micro servo motor</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="1 micro USB cable">
+          <span>1 micro USB cable</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="1 piezo speaker">
+          <span>1 piezo speaker</span>
+        </label>
+        <label class="check-item">
+          <input type="checkbox" data-label="5 Different color LEDs">
+          <span>5 Different color LEDs</span>
+        </label>
+      </div>
+      <div class="controls-grid compact-actions">
+        <button id="saveResultButton" type="button" class="primary">Run test and save results</button>
+        <button id="nextBoardButton" type="button">Reset</button>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
         <h2>Quick Start</h2>
-        <p>Plug in a board, choose the port, then run the full test.</p>
+        <p>Plug in a board, choose the port, then test the Arduino.</p>
       </div>
       <div class="controls-grid">
         <label class="field">
@@ -67,7 +158,7 @@
           <select id="portSelect"></select>
         </label>
         <button id="refreshPortsButton" type="button">Refresh Ports</button>
-        <button id="runFullTestButton" type="button" class="primary">Prepare, Upload and Start Test</button>
+        <button id="runFullTestButton" type="button" class="primary">Test Arduino</button>
         <button id="uploadButton" type="button">Upload Only</button>
         <button id="connectButton" type="button">Connect Live Data</button>
         <button id="disconnectButton" type="button">Disconnect</button>
@@ -95,23 +186,13 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Kit Checklist</h2>
-        <p>Tick the kit contents before saving the final result.</p>
-      </div>
-      <div id="checklistGrid" class="checklist-grid"></div>
-      <div class="controls-grid compact-actions">
-        <button id="saveResultButton" type="button" class="primary">Save Result For This Kit</button>
-        <button id="nextBoardButton" type="button">Reset For Next Kit</button>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
         <h2>Batch Summary</h2>
         <p>Running totals for this batch and where the report files are saved.</p>
       </div>
       <div id="historySummaryCards" class="summary-grid"></div>
       <div class="file-list small">
+        <div>Running from: <code id="runningRoot">-</code></div>
+        <div>Metadata: <code id="metadataPath">-</code></div>
         <div>JSON report: <code id="jsonPath">-</code></div>
         <div>CSV report: <code id="csvPath">-</code></div>
       </div>
@@ -154,9 +235,11 @@
           <tr>
             <th>Time</th>
             <th>Inventory</th>
+            <th>Name</th>
             <th>Result</th>
             <th>Revision</th>
             <th>Missing kit items</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody id="recentTestsRows"></tbody>
@@ -175,6 +258,6 @@
     </section>
   </main>
 
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=20260417-6"></script>
 </body>
 </html>

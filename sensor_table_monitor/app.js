@@ -11,9 +11,22 @@ const logLines = document.querySelector("#logLines");
 const portSelect = document.querySelector("#portSelect");
 const checklistGrid = document.querySelector("#checklistGrid");
 const recentTestsRows = document.querySelector("#recentTestsRows");
+const runningRoot = document.querySelector("#runningRoot");
+const metadataPath = document.querySelector("#metadataPath");
 const jsonPath = document.querySelector("#jsonPath");
 const csvPath = document.querySelector("#csvPath");
+const testMetadataPrompt = document.querySelector("#testMetadataPrompt");
+const testMetadataSummary = document.querySelector("#testMetadataSummary");
+const testMetadataForm = document.querySelector("#testMetadataForm");
+const testNameValue = document.querySelector("#testNameValue");
+const testResponsibleValue = document.querySelector("#testResponsibleValue");
+const testSavedAtValue = document.querySelector("#testSavedAtValue");
+const testNotesValue = document.querySelector("#testNotesValue");
+const testNameInput = document.querySelector("#testNameInput");
+const testResponsibleInput = document.querySelector("#testResponsibleInput");
+const testMetadataNotesInput = document.querySelector("#testMetadataNotesInput");
 const inventoryIdInput = document.querySelector("#inventoryIdInput");
+const inventoryNameInput = document.querySelector("#inventoryNameInput");
 const operatorInput = document.querySelector("#operatorInput");
 const notesInput = document.querySelector("#notesInput");
 
@@ -24,7 +37,9 @@ const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
 const setupButton = document.querySelector("#setupButton");
 const installPyserialButton = document.querySelector("#installPyserialButton");
-const saveSessionButton = document.querySelector("#saveSessionButton");
+const editTestMetadataButton = document.querySelector("#editTestMetadataButton");
+const saveTestMetadataButton = document.querySelector("#saveTestMetadataButton");
+const cancelTestMetadataEditButton = document.querySelector("#cancelTestMetadataEditButton");
 const saveResultButton = document.querySelector("#saveResultButton");
 const nextBoardButton = document.querySelector("#nextBoardButton");
 
@@ -37,6 +52,15 @@ const sketchStatus = document.querySelector("#sketchStatus");
 let pollTimer = null;
 let selectedPort = "";
 let checklistState = {};
+let sessionDirty = false;
+let checklistDirty = false;
+let usedKitNumbers = new Set();
+let kitNumberCheckTimer = null;
+let editingInventoryId = "";
+let testMetadataDirty = false;
+let testMetadataEditing = false;
+let lastTestMetadata = null;
+let stickyStatus = null;
 
 function badgeClass(status) {
   if (status === "ok") return "status-ok";
@@ -52,8 +76,113 @@ function badgeLabel(status) {
   return "Waiting";
 }
 
-function setStatus(message) {
+function setStatus(message, tone = "info") {
   statusText.textContent = message;
+  statusText.classList.toggle("status-warning", tone === "warning");
+  statusText.classList.toggle("status-error", tone === "error");
+}
+
+function displayValue(value) {
+  const text = `${value || ""}`.trim();
+  return text || "-";
+}
+
+function renderTestMetadata(metadata = {}) {
+  lastTestMetadata = metadata;
+  const isSaved = Boolean(metadata.isSaved || (metadata.test_name && metadata.test_responsible));
+  const showForm = testMetadataEditing || !isSaved;
+  testMetadataSummary.hidden = showForm;
+  testMetadataForm.hidden = !showForm;
+  cancelTestMetadataEditButton.hidden = !isSaved;
+  testMetadataPrompt.textContent = isSaved
+    ? "These details are saved for this test."
+    : "Save the test details before recording the first kit.";
+
+  testNameValue.textContent = displayValue(metadata.test_name);
+  testResponsibleValue.textContent = displayValue(metadata.test_responsible);
+  testSavedAtValue.textContent = displayValue(metadata.saved_at);
+  testNotesValue.textContent = displayValue(metadata.notes);
+
+  if (!testMetadataDirty) {
+    testNameInput.value = metadata.test_name || "";
+    testResponsibleInput.value = metadata.test_responsible || "";
+    testMetadataNotesInput.value = metadata.notes || "";
+  }
+}
+
+function hasInventoryIdentity() {
+  return Boolean(inventoryIdInput.value.trim());
+}
+
+function normalizeKitNumber() {
+  const cleanValue = inventoryIdInput.value.replace(/\D/g, "").slice(0, 4);
+  if (inventoryIdInput.value !== cleanValue) {
+    inventoryIdInput.value = cleanValue;
+  }
+  return cleanValue;
+}
+
+function kitNumberError() {
+  const kitNumber = normalizeKitNumber();
+  if (!kitNumber) {
+    return "Kit number is missing. Enter the kit number in Kit Details, then press Run test and save results again.";
+  }
+  if (usedKitNumbers.has(kitNumber) && kitNumber !== editingInventoryId) {
+    return `Kit number ${kitNumber} has already been saved in this batch. Use a different kit number or update the saved kit instead.`;
+  }
+  return "";
+}
+
+function scheduleKitNumberCheck() {
+  if (kitNumberCheckTimer) window.clearTimeout(kitNumberCheckTimer);
+  kitNumberCheckTimer = window.setTimeout(async () => {
+    const kitNumber = normalizeKitNumber();
+    if (!kitNumber) return;
+    if (usedKitNumbers.has(kitNumber) && kitNumber !== editingInventoryId) {
+      stickyStatus = {
+        message: `Kit number ${kitNumber} has already been saved in this batch. Use a different kit number or update the saved kit instead.`,
+        tone: "warning"
+      };
+      setStatus(stickyStatus.message, stickyStatus.tone);
+      return;
+    }
+    try {
+      const response = await fetch(`/api/check-kit-number?kit=${encodeURIComponent(kitNumber)}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (payload.exists && kitNumber !== editingInventoryId) {
+        usedKitNumbers.add(kitNumber);
+        stickyStatus = {
+          message: `Kit number ${kitNumber} has already been saved in this batch. Use a different kit number or update the saved kit instead.`,
+          tone: "warning"
+        };
+        setStatus(stickyStatus.message, stickyStatus.tone);
+      }
+    } catch (error) {
+      // The save action still validates server-side. Keep typing responsive if this check fails.
+    }
+  }, 250);
+}
+
+function bindChecklistInputs() {
+  checklistGrid.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checklistState[checkbox.dataset.label] = checkbox.checked;
+    checkbox.addEventListener("change", (event) => {
+      const input = event.currentTarget;
+      checklistState[input.dataset.label] = input.checked;
+      checklistDirty = true;
+    });
+  });
+}
+
+function updateSaveResultState(isBusy = false) {
+  saveResultButton.disabled = isBusy;
+  saveResultButton.textContent = editingInventoryId ? "Update saved result" : "Run test and save results";
+}
+
+function updateTestMetadataButtonState(isBusy = false) {
+  saveTestMetadataButton.disabled = isBusy;
+  editTestMetadataButton.disabled = isBusy;
+  cancelTestMetadataEditButton.disabled = isBusy;
 }
 
 async function callApi(path, body = {}) {
@@ -174,24 +303,32 @@ function renderRequirements(status) {
 
 function renderChecklist(checklist) {
   checklistGrid.innerHTML = "";
-  checklistState = {};
+  if (!checklistDirty) {
+    checklistState = {};
+  }
   checklist.forEach((item) => {
-    checklistState[item.label] = Boolean(item.present);
+    if (!checklistDirty || item.autoPresent || item.key === "arduino") {
+      checklistState[item.label] = Boolean(item.present);
+    }
+    const isPresent = Boolean(checklistState[item.label]);
     const label = document.createElement("label");
     label.className = "check-item";
     label.innerHTML = `
-      <input type="checkbox" ${item.present ? "checked" : ""} data-label="${item.label}">
-      <span>${item.label}</span>
+      <input
+        type="checkbox"
+        ${isPresent ? "checked" : ""}
+        data-label="${item.label}"
+        data-check-key="${item.key || ""}"
+        data-auto-present="${item.autoPresent ? "true" : ""}">
+      <span>
+        ${item.label}
+        ${item.detail ? `<small>${item.detail}</small>` : ""}
+      </span>
     `;
     checklistGrid.append(label);
   });
 
-  checklistGrid.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-    checkbox.addEventListener("change", (event) => {
-      const input = event.currentTarget;
-      checklistState[input.dataset.label] = input.checked;
-    });
-  });
+  bindChecklistInputs();
 }
 
 function renderRecentTests(rows) {
@@ -199,37 +336,49 @@ function renderRecentTests(rows) {
   rows.slice().reverse().forEach((row) => {
     const tr = document.createElement("tr");
     const missing = Array.isArray(row.missing_items) ? row.missing_items.join(", ") : "";
+    const inventoryId = row.inventory_id || "";
     tr.innerHTML = `
       <td>${row.tested_at || ""}</td>
-      <td>${row.inventory_id || ""}</td>
+      <td>${inventoryId}</td>
+      <td>${row.inventory_name || ""}</td>
       <td>${row.result || ""}</td>
       <td>${row.revision || ""}</td>
       <td>${missing || "-"}</td>
+      <td><button type="button" class="small-action" data-edit-kit="${inventoryId}">Update</button></td>
     `;
     recentTestsRows.append(tr);
   });
 }
 
 function renderStatus(status) {
+  usedKitNumbers = new Set(status.usedKitNumbers || []);
+  editingInventoryId = status.editingInventoryId || "";
   currentTask.textContent = status.currentTask;
   snapshotCount.textContent = `${status.snapshotCount}`;
   lastDataAt.textContent = status.lastDataAt || "None";
   detectedRevision.textContent = status.detectedRevision ? status.detectedRevision.toUpperCase() : "Unknown";
   appVersion.textContent = `v${status.app.version}`;
+  appVersion.title = status.app.root || "";
   statusText.classList.toggle("status-live", Boolean(status.busy));
 
   renderPorts(status.ports, status.connectedPort || selectedPort);
   renderRequirements(status);
   renderSummary(status.summary);
   renderHistorySummary(status.historySummary);
+  renderTestMetadata(status.testMetadata || {});
   renderSensors(status.sensors);
   renderLogs(status.logs);
   renderChecklist(status.inventory.checklist);
   renderRecentTests(status.recentTests || []);
 
-  inventoryIdInput.value = status.inventory.inventoryId || "";
-  operatorInput.value = status.inventory.operator || "";
-  notesInput.value = status.inventory.notes || "";
+  if (!sessionDirty) {
+    inventoryIdInput.value = status.inventory.inventoryId || "";
+    if (inventoryNameInput) inventoryNameInput.value = status.inventory.inventoryName || "";
+    operatorInput.value = status.inventory.operator || "";
+    notesInput.value = status.inventory.notes || "";
+  }
+  if (runningRoot) runningRoot.textContent = status.app.root || "-";
+  if (metadataPath) metadataPath.textContent = status.historyFiles.metadata || "-";
   jsonPath.textContent = status.historyFiles.json || "-";
   csvPath.textContent = status.historyFiles.csv || "-";
 
@@ -241,20 +390,24 @@ function renderStatus(status) {
   disconnectButton.disabled = busy || !status.serialConnected;
   setupButton.disabled = busy;
   installPyserialButton.disabled = busy || status.requirements.pyserialFound;
-  saveSessionButton.disabled = busy;
-  saveResultButton.disabled = busy || !inventoryIdInput.value.trim();
+  updateTestMetadataButtonState(busy);
+  updateSaveResultState(busy);
   nextBoardButton.disabled = busy;
 
-  if (status.serialError) {
-    setStatus(status.serialError);
+  if (stickyStatus) {
+    setStatus(stickyStatus.message, stickyStatus.tone);
+  } else if (status.serialError) {
+    setStatus(status.serialError, "error");
+  } else if (status.testMetadata?.required) {
+    setStatus("Save test metadata before recording the first kit.", "warning");
   } else if (status.commandResult) {
     setStatus(status.commandResult);
   } else if (!status.requirements.arduinoCliFound) {
-    setStatus("Arduino CLI is missing. Install it first, then refresh.");
+    setStatus("Arduino CLI is missing. Install it first, then refresh.", "warning");
   } else if (!status.requirements.pyserialFound) {
-    setStatus("pyserial is missing. Install it from this page, then restart the launcher.");
+    setStatus("pyserial is missing. Install it from this page, then restart the launcher.", "warning");
   } else if (!status.ports.length) {
-    setStatus("No serial ports detected. Plug in a board and refresh ports.");
+    setStatus("No serial ports detected. Plug in a board and refresh ports.", "warning");
   } else if (!status.serialConnected) {
     setStatus("Board detected. Run the full test or connect to live data.");
   } else {
@@ -263,28 +416,65 @@ function renderStatus(status) {
 }
 
 async function refreshStatus() {
-  const response = await fetch("/api/status", { cache: "no-store" });
-  const status = await response.json();
-  renderStatus(status);
+  try {
+    const response = await fetch("/api/status", { cache: "no-store" });
+    const status = await response.json();
+    renderStatus(status);
+  } catch (error) {
+    setStatus("Could not reach the local Python runner. The checklist is still available, but saving needs the launcher running.", "error");
+    updateSaveResultState(false);
+  }
 }
 
 async function runAction(action) {
+  let actionError = null;
+  stickyStatus = null;
   try {
     await action();
   } catch (error) {
-    setStatus(error.message || "Action failed.");
+    actionError = error;
   } finally {
     await refreshStatus();
+    if (actionError) {
+      stickyStatus = { message: actionError.message || "Action failed.", tone: "error" };
+      setStatus(stickyStatus.message, stickyStatus.tone);
+    }
   }
 }
 
 function currentSessionPayload() {
   return {
     inventoryId: inventoryIdInput.value.trim(),
+    inventoryName: inventoryNameInput?.value.trim() || "",
     operator: operatorInput.value.trim(),
     notes: notesInput.value.trim(),
     checklist: checklistState
   };
+}
+
+function currentTestMetadataPayload() {
+  return {
+    testName: testNameInput.value.trim(),
+    testResponsible: testResponsibleInput.value.trim(),
+    notes: testMetadataNotesInput.value.trim()
+  };
+}
+
+async function testArduino() {
+  if (!getSelectedPort()) {
+    throw new Error("Select a board port before testing the Arduino.");
+  }
+  await callApi("/api/set-session", currentSessionPayload());
+  sessionDirty = false;
+  checklistDirty = false;
+  setStatus("Preparing, uploading and connecting.");
+  const result = await callApi("/api/run-full-test", { port: getSelectedPort() });
+  setStatus(result.message);
+}
+
+function shouldRunArduinoBeforeSave() {
+  const checkbox = checklistGrid.querySelector("input[data-check-key='arduino']");
+  return Boolean(checkbox?.checked && !checkbox.dataset.autoPresent);
 }
 
 refreshPortsButton.addEventListener("click", refreshStatus);
@@ -292,10 +482,43 @@ portSelect.addEventListener("change", () => {
   selectedPort = portSelect.value;
 });
 
-saveSessionButton.addEventListener("click", async () => {
+[testNameInput, testResponsibleInput, testMetadataNotesInput].forEach((input) => {
+  input.addEventListener("input", () => {
+    testMetadataDirty = true;
+  });
+});
+
+editTestMetadataButton.addEventListener("click", () => {
+  testMetadataEditing = true;
+  testMetadataDirty = false;
+  renderTestMetadata(lastTestMetadata || {});
+});
+
+cancelTestMetadataEditButton.addEventListener("click", () => {
+  testMetadataEditing = false;
+  testMetadataDirty = false;
+  renderTestMetadata(lastTestMetadata || {});
+});
+
+saveTestMetadataButton.addEventListener("click", async () => {
   await runAction(async () => {
-    const result = await callApi("/api/set-session", currentSessionPayload());
+    const result = await callApi("/api/set-test-metadata", currentTestMetadataPayload());
+    testMetadataEditing = false;
+    testMetadataDirty = false;
+    renderTestMetadata(result.metadata || {});
     setStatus(result.message);
+  });
+});
+
+[inventoryIdInput, inventoryNameInput, operatorInput, notesInput].filter(Boolean).forEach((input) => {
+  input.addEventListener("input", () => {
+    if (input === inventoryIdInput) {
+      normalizeKitNumber();
+      scheduleKitNumberCheck();
+    }
+    stickyStatus = null;
+    sessionDirty = true;
+    updateSaveResultState(false);
   });
 });
 
@@ -340,32 +563,54 @@ disconnectButton.addEventListener("click", async () => {
 
 runFullTestButton.addEventListener("click", async () => {
   await runAction(async () => {
-    await callApi("/api/set-session", currentSessionPayload());
-    setStatus("Preparing, uploading and connecting.");
-    const result = await callApi("/api/run-full-test", { port: getSelectedPort() });
-    setStatus(result.message);
+    await testArduino();
   });
 });
 
 saveResultButton.addEventListener("click", async () => {
   await runAction(async () => {
-    if (!inventoryIdInput.value.trim()) {
-      throw new Error("Enter an inventory number before saving.");
+    const validationError = kitNumberError();
+    if (validationError) {
+      throw new Error(validationError);
     }
-    await callApi("/api/set-session", currentSessionPayload());
-    const result = await callApi("/api/record-result");
+    if (shouldRunArduinoBeforeSave()) {
+      await testArduino();
+    } else {
+      setStatus("Saving result for this kit.");
+      await callApi("/api/set-session", currentSessionPayload());
+    }
+    sessionDirty = false;
+    checklistDirty = false;
+    const result = await callApi("/api/record-result", { update: Boolean(editingInventoryId) });
     setStatus(result.message);
+  });
+});
+
+recentTestsRows.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-edit-kit]");
+  if (!button) return;
+  await runAction(async () => {
+    const inventoryId = button.dataset.editKit || "";
+    setStatus(`Loading kit ${inventoryId} for update.`);
+    const result = await callApi("/api/edit-result", { inventoryId });
+    sessionDirty = false;
+    checklistDirty = false;
+    setStatus(result.message);
+    document.querySelector("#statusText").scrollIntoView({ behavior: "smooth", block: "center" });
   });
 });
 
 nextBoardButton.addEventListener("click", async () => {
   await runAction(async () => {
     const result = await callApi("/api/reset-for-next");
+    sessionDirty = false;
+    checklistDirty = false;
     setStatus(result.message);
   });
 });
 
 async function startPolling() {
+  bindChecklistInputs();
   await refreshStatus();
   pollTimer = window.setInterval(refreshStatus, 1500);
 }

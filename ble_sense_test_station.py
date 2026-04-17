@@ -29,9 +29,10 @@ SKETCH_DIR = ROOT / "sense_table_stream"
 DATA_DIR = ROOT / "test_records"
 RESULTS_JSON = DATA_DIR / "board_tests.json"
 RESULTS_CSV = DATA_DIR / "board_tests.csv"
+TEST_METADATA_JSON = DATA_DIR / "test_metadata.json"
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "1.0"
+APP_VERSION = "1.2"
 
 BOARD_PROFILE = {
     "id": "nano33ble",
@@ -72,17 +73,18 @@ SENSOR_DEFINITIONS = [
 ]
 
 KIT_CHECKLIST = [
-    "Arduino Nano 33 BLE Sense with headers",
-    "Breadboard",
-    "20 connection wires",
-    "Potentiometer / trimmer",
+    "1 Arduino Nano 33 BLE Sense with headers",
+    "1 Breadboard",
+    "20 Connection wires",
+    "1 potentiometer / trimmer",
     "3 buttons / tactile switches",
-    "LED ring or stripe",
-    "Micro servo motor",
-    "Micro USB cable",
-    "Piezo speaker",
-    "5 LEDs in different colors",
+    "1 LED ring or stripe",
+    "1 micro servo motor",
+    "1 micro USB cable",
+    "1 piezo speaker",
+    "5 Different color LEDs",
 ]
+ARDUINO_CHECKLIST_ITEM = KIT_CHECKLIST[0]
 
 
 @dataclass
@@ -107,6 +109,9 @@ class AppState:
     serial_handle: Any = None
     serial_error: str | None = None
     last_snapshot: dict[str, Any] | None = None
+    current_board_uid: str | None = None
+    current_port_hwid: str | None = None
+    board_test_run: bool = False
     snapshot_count: int = 0
     last_data_at: str | None = None
     upload_result: str | None = None
@@ -114,10 +119,13 @@ class AppState:
     command_result: str | None = None
     detected_revision: str | None = None
     current_inventory_id: str = ""
+    current_inventory_name: str = ""
     current_operator: str = ""
     checklist_state: dict[str, bool] = field(default_factory=lambda: {item: False for item in KIT_CHECKLIST})
     notes: str = ""
+    editing_inventory_id: str = ""
     test_history: list[dict[str, Any]] = field(default_factory=list)
+    test_metadata: dict[str, str] = field(default_factory=dict)
     sensor_state: dict[str, SensorTracker] = field(
         default_factory=lambda: {item["key"]: SensorTracker(item["key"]) for item in SENSOR_DEFINITIONS}
     )
@@ -169,11 +177,83 @@ def load_test_history() -> list[dict[str, Any]]:
         return []
 
 
+def empty_test_metadata() -> dict[str, str]:
+    return {
+        "test_name": "",
+        "test_responsible": "",
+        "notes": "",
+        "saved_at": "",
+        "updated_at": "",
+    }
+
+
+def normalize_test_metadata(payload: Any) -> dict[str, str]:
+    metadata = empty_test_metadata()
+    if isinstance(payload, dict):
+        metadata.update(
+            {
+                "test_name": str(payload.get("test_name") or payload.get("testName") or "").strip(),
+                "test_responsible": str(
+                    payload.get("test_responsible") or payload.get("testResponsible") or ""
+                ).strip(),
+                "notes": str(payload.get("notes") or "").strip(),
+                "saved_at": str(payload.get("saved_at") or payload.get("savedAt") or "").strip(),
+                "updated_at": str(payload.get("updated_at") or payload.get("updatedAt") or "").strip(),
+            }
+        )
+    return metadata
+
+
+def load_test_metadata() -> dict[str, str]:
+    ensure_data_dir()
+    if not TEST_METADATA_JSON.exists():
+        return empty_test_metadata()
+    try:
+        return normalize_test_metadata(json.loads(TEST_METADATA_JSON.read_text(encoding="utf-8")))
+    except Exception:
+        return empty_test_metadata()
+
+
+def metadata_is_saved() -> bool:
+    return bool(STATE.test_metadata.get("test_name") and STATE.test_metadata.get("test_responsible"))
+
+
+def save_test_metadata(payload: dict[str, Any]) -> dict[str, str]:
+    test_name = str(payload.get("testName") or payload.get("test_name") or "").strip()
+    responsible = str(payload.get("testResponsible") or payload.get("test_responsible") or "").strip()
+    notes = str(payload.get("notes") or "").strip()
+    if not test_name:
+        raise RuntimeError("Enter a test name before saving test metadata.")
+    if not responsible:
+        raise RuntimeError("Enter the test responsible before saving test metadata.")
+
+    now = now_iso()
+    existing_saved_at = str(STATE.test_metadata.get("saved_at") or "").strip()
+    metadata = {
+        "test_name": test_name,
+        "test_responsible": responsible,
+        "notes": notes,
+        "saved_at": existing_saved_at or now,
+        "updated_at": now if existing_saved_at else "",
+    }
+    ensure_data_dir()
+    try:
+        TEST_METADATA_JSON.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"Could not write test metadata in {TEST_METADATA_JSON}: {exc}") from exc
+    STATE.test_metadata = metadata
+    STATE.log("info", f"Saved test metadata in {TEST_METADATA_JSON}.")
+    STATE.set_command_result("Test metadata saved.")
+    return metadata
+
+
 def write_csv(rows: list[dict[str, Any]]) -> None:
     ensure_data_dir()
     headers = [
         "tested_at",
         "inventory_id",
+        "inventory_name",
+        "board_uid",
         "operator",
         "port",
         "revision",
@@ -200,17 +280,33 @@ def write_csv(rows: list[dict[str, Any]]) -> None:
 
 def persist_history() -> None:
     ensure_data_dir()
-    RESULTS_JSON.write_text(json.dumps(STATE.test_history, indent=2), encoding="utf-8")
-    write_csv(STATE.test_history)
+    try:
+        RESULTS_JSON.write_text(json.dumps(STATE.test_history, indent=2), encoding="utf-8")
+        write_csv(STATE.test_history)
+    except OSError as exc:
+        raise RuntimeError(f"Could not write result files in {DATA_DIR}: {exc}") from exc
 
 
 def reset_sensor_trackers() -> None:
     for definition in SENSOR_DEFINITIONS:
         STATE.sensor_state[definition["key"]] = SensorTracker(definition["key"])
     STATE.last_snapshot = None
+    STATE.current_board_uid = None
+    STATE.current_port_hwid = None
+    STATE.board_test_run = False
     STATE.snapshot_count = 0
     STATE.last_data_at = None
     STATE.serial_error = None
+
+
+def reset_current_kit() -> None:
+    reset_sensor_trackers()
+    STATE.current_inventory_id = ""
+    STATE.current_inventory_name = ""
+    STATE.current_operator = ""
+    STATE.notes = ""
+    STATE.editing_inventory_id = ""
+    STATE.checklist_state = {item: False for item in KIT_CHECKLIST}
 
 
 def get_python_command() -> list[str]:
@@ -314,6 +410,24 @@ def list_serial_ports() -> list[dict[str, Any]]:
 
     result.sort(key=lambda item: item["address"] or "")
     return result
+
+
+def get_port_hwid(port: str | None) -> str:
+    if not port:
+        return ""
+    match = next((item for item in list_serial_ports() if item.get("address") == port), None)
+    return str(match.get("hwid") or "").strip() if match else ""
+
+
+def get_current_board_hardware_id() -> str:
+    snapshot_uid = ""
+    if isinstance(STATE.last_snapshot, dict):
+        snapshot_uid = str(STATE.last_snapshot.get("board_uid") or "").strip()
+    return str(STATE.current_board_uid or snapshot_uid or STATE.current_port_hwid or "").strip()
+
+
+def board_test_has_run() -> bool:
+    return STATE.board_test_run or STATE.snapshot_count > 0 or bool(get_current_board_hardware_id())
 
 
 def detect_board_revision(port: str | None) -> str:
@@ -562,6 +676,10 @@ def serial_reader_loop(handle: Any, port: str) -> None:
             STATE.last_snapshot = payload
             STATE.snapshot_count += 1
             STATE.last_data_at = now_iso()
+            board_uid = str(payload.get("board_uid") or "").strip()
+            if board_uid:
+                STATE.current_board_uid = board_uid
+            STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
             update_sensor_state(payload)
 
     disconnect_serial()
@@ -581,6 +699,9 @@ def connect_serial(port: str) -> str:
 
     STATE.serial_handle = handle
     STATE.connected_port = port
+    STATE.current_port_hwid = get_port_hwid(port)
+    STATE.board_test_run = True
+    STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
     STATE.serial_error = None
     thread = threading.Thread(target=serial_reader_loop, args=(handle, port), daemon=True)
     STATE.serial_thread = thread
@@ -605,12 +726,94 @@ def classify_result(summary: dict[str, int], checklist_state: dict[str, bool]) -
     return "PASS"
 
 
+def get_used_kit_numbers(excluding: str = "") -> set[str]:
+    excluded = excluding.strip()
+    return {
+        str(row.get("inventory_id") or "").strip()
+        for row in STATE.test_history
+        if str(row.get("inventory_id") or "").strip() and str(row.get("inventory_id") or "").strip() != excluded
+    }
+
+
+def find_record_by_hardware_id(hardware_id: str, excluding_inventory_id: str = "") -> dict[str, Any] | None:
+    normalized = hardware_id.strip().lower()
+    excluded = excluding_inventory_id.strip()
+    if not normalized:
+        return None
+    return next(
+        (
+            row
+            for row in STATE.test_history
+            if str(row.get("board_uid") or "").strip().lower() == normalized
+            and str(row.get("inventory_id") or "").strip() != excluded
+        ),
+        None,
+    )
+
+
+def load_test_for_update(inventory_id: str) -> dict[str, Any]:
+    kit_number = inventory_id.strip()
+    if not kit_number:
+        raise RuntimeError("Choose a kit to update.")
+    record = next((row for row in STATE.test_history if str(row.get("inventory_id") or "").strip() == kit_number), None)
+    if not record:
+        raise RuntimeError(f"Kit number {kit_number} was not found in the saved results.")
+
+    reset_sensor_trackers()
+    STATE.current_inventory_id = str(record.get("inventory_id") or "").strip()
+    STATE.current_inventory_name = str(record.get("inventory_name") or "").strip()
+    STATE.current_operator = str(record.get("operator") or "").strip()
+    STATE.notes = str(record.get("notes") or "").strip()
+    STATE.detected_revision = str(record.get("revision") or "").strip() or None
+    STATE.last_snapshot = record.get("last_snapshot")
+    checklist = record.get("checklist") or {}
+    if isinstance(checklist, dict):
+        for item in KIT_CHECKLIST:
+            STATE.checklist_state[item] = bool(checklist.get(item, False))
+    STATE.current_board_uid = str(record.get("board_uid") or "").strip() or None
+    if STATE.current_board_uid:
+        STATE.board_test_run = True
+        STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+
+    sensors = record.get("sensors") or {}
+    if isinstance(sensors, dict):
+        for key, sensor in sensors.items():
+            if key in STATE.sensor_state and isinstance(sensor, dict):
+                STATE.sensor_state[key].status = str(sensor.get("status") or "waiting")
+                STATE.sensor_state[key].value = str(sensor.get("value") or "--")
+                STATE.sensor_state[key].note = str(sensor.get("note") or "Waiting for data.")
+
+    STATE.editing_inventory_id = kit_number
+    STATE.set_command_result(f"Updating saved result for kit {kit_number}. Make changes, then save the result again.")
+    STATE.log("info", f"Loaded saved result for kit {kit_number} for updating.")
+    return record
+
+
 def record_current_test() -> dict[str, Any]:
+    if not STATE.test_history and not metadata_is_saved():
+        raise RuntimeError("Save test metadata before recording the first kit result.")
+    kit_number = STATE.current_inventory_id.strip()
+    if not kit_number:
+        raise RuntimeError("Enter a kit number before saving.")
+    if not kit_number.isdigit() or len(kit_number) > 4:
+        raise RuntimeError("Kit number must be 1 to 4 digits.")
+    editing_kit = STATE.editing_inventory_id.strip()
+    if kit_number in get_used_kit_numbers(excluding=editing_kit):
+        raise RuntimeError(f"Kit number {kit_number} has already been saved in this batch.")
+    if board_test_has_run():
+        STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
     summary = get_summary()
     missing_items = [item for item, present in STATE.checklist_state.items() if not present]
+    board_hardware_id = get_current_board_hardware_id()
+    duplicate_hardware_record = find_record_by_hardware_id(board_hardware_id, excluding_inventory_id=editing_kit)
+    if duplicate_hardware_record:
+        duplicate_kit = str(duplicate_hardware_record.get("inventory_id") or "another kit").strip()
+        raise RuntimeError(f"Hardware ID {board_hardware_id} has already been saved for kit {duplicate_kit}.")
     record = {
         "tested_at": now_iso(),
-        "inventory_id": STATE.current_inventory_id.strip(),
+        "inventory_id": kit_number,
+        "inventory_name": STATE.current_inventory_name.strip(),
+        "board_uid": board_hardware_id,
         "operator": STATE.current_operator.strip(),
         "port": STATE.connected_port or "",
         "revision": STATE.detected_revision or "",
@@ -633,8 +836,25 @@ def record_current_test() -> dict[str, Any]:
             for definition in SENSOR_DEFINITIONS
         },
     }
-    STATE.test_history.append(record)
+    if editing_kit:
+        existing_index = next(
+            (index for index, row in enumerate(STATE.test_history) if str(row.get("inventory_id") or "").strip() == editing_kit),
+            None,
+        )
+        if existing_index is None:
+            raise RuntimeError(f"Kit number {editing_kit} was not found in the saved results.")
+        STATE.test_history.pop(existing_index)
+        STATE.test_history.append(record)
+        STATE.editing_inventory_id = ""
+    else:
+        STATE.test_history.append(record)
     persist_history()
+    kit_label = record["inventory_id"] or record["inventory_name"] or "unnamed kit"
+    action = "Updated" if editing_kit else "Saved"
+    STATE.log(
+        "info",
+        f"{action} result for {kit_label} in {RESULTS_JSON} and {RESULTS_CSV}.",
+    )
     return record
 
 
@@ -652,10 +872,15 @@ def get_status_payload() -> dict[str, Any]:
     ports = list_serial_ports()
     with STATE.lock:
         STATE.ports = ports
+        if board_test_has_run():
+            STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+        board_hardware_id = get_current_board_hardware_id()
         return {
             "app": {
                 "title": "BLE Sense Test Station",
                 "version": APP_VERSION,
+                "root": str(ROOT),
+                "staticDir": str(STATIC_DIR),
                 "boardProfile": BOARD_PROFILE,
                 "python": sys.version.split()[0],
                 "platform": platform.platform(),
@@ -676,21 +901,40 @@ def get_status_payload() -> dict[str, Any]:
             "snapshotCount": STATE.snapshot_count,
             "lastDataAt": STATE.last_data_at,
             "lastSnapshot": STATE.last_snapshot,
+            "boardHardwareId": board_hardware_id,
             "setupResult": STATE.setup_result,
             "uploadResult": STATE.upload_result,
             "commandResult": STATE.command_result,
             "summary": get_summary(),
             "historySummary": get_history_summary(),
             "historyCount": len(STATE.test_history),
+            "usedKitNumbers": sorted(get_used_kit_numbers(), key=lambda value: (0, int(value)) if value.isdigit() else (1, value)),
+            "editingInventoryId": STATE.editing_inventory_id,
             "historyFiles": {
                 "json": str(RESULTS_JSON),
                 "csv": str(RESULTS_CSV),
+                "metadata": str(TEST_METADATA_JSON),
+            },
+            "testMetadata": {
+                **STATE.test_metadata,
+                "isSaved": metadata_is_saved(),
+                "required": not STATE.test_history and not metadata_is_saved(),
             },
             "inventory": {
                 "inventoryId": STATE.current_inventory_id,
+                "inventoryName": STATE.current_inventory_name,
                 "operator": STATE.current_operator,
                 "notes": STATE.notes,
-                "checklist": [{"label": item, "present": STATE.checklist_state.get(item, False)} for item in KIT_CHECKLIST],
+                "checklist": [
+                    {
+                        "label": item,
+                        "present": STATE.checklist_state.get(item, False),
+                        "detail": f"Hardware ID: {board_hardware_id}" if item == ARDUINO_CHECKLIST_ITEM and board_hardware_id else "",
+                        "autoPresent": item == ARDUINO_CHECKLIST_ITEM and board_test_has_run(),
+                        "key": "arduino" if item == ARDUINO_CHECKLIST_ITEM else "",
+                    }
+                    for item in KIT_CHECKLIST
+                ],
             },
             "sensors": [
                 {
@@ -722,6 +966,12 @@ class ApiHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self) -> None:
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        super().end_headers()
+
     def read_json_body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
@@ -735,6 +985,19 @@ class ApiHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/status":
             self.send_json(get_status_payload())
+            return
+        if parsed.path == "/api/check-kit-number":
+            query = urlparse(self.path).query
+            kit_number = ""
+            for part in query.split("&"):
+                key, _, value = part.partition("=")
+                if key == "kit":
+                    kit_number = value.strip()
+                    break
+            if kit_number and (not kit_number.isdigit() or len(kit_number) > 4):
+                self.send_json({"ok": False, "error": "Kit number must be 1 to 4 digits."}, status=HTTPStatus.BAD_REQUEST)
+                return
+            self.send_json({"ok": True, "exists": kit_number in get_used_kit_numbers()})
             return
         if parsed.path in {"/", "/index.html"}:
             self.path = "/index.html"
@@ -783,18 +1046,30 @@ class ApiHandler(SimpleHTTPRequestHandler):
                 self.handle_set_session(payload)
                 self.send_json({"ok": True, "message": "Session details saved."})
                 return
+            if parsed.path == "/api/set-test-metadata":
+                metadata = save_test_metadata(payload)
+                self.send_json({"ok": True, "message": STATE.command_result, "metadata": metadata})
+                return
             if parsed.path == "/api/record-result":
                 record = record_current_test()
-                STATE.set_command_result(f"Saved result for {record['inventory_id'] or 'unnamed board'} as {record['result']}.")
+                kit_label = record["inventory_id"] or record["inventory_name"] or "unnamed kit"
+                action = "Updated" if payload.get("update") else "Saved"
+                disconnect_serial()
+                reset_current_kit()
+                STATE.set_command_result(
+                    f"{action} {kit_label} as {record['result']} in {RESULTS_JSON.name} and {RESULTS_CSV.name}. Ready for the next kit."
+                )
+                self.send_json({"ok": True, "message": STATE.command_result, "record": record})
+                return
+            if parsed.path == "/api/edit-result":
+                inventory_id = str(payload.get("inventoryId") or "").strip()
+                record = load_test_for_update(inventory_id)
                 self.send_json({"ok": True, "message": STATE.command_result, "record": record})
                 return
             if parsed.path == "/api/reset-for-next":
                 disconnect_serial()
-                reset_sensor_trackers()
-                STATE.current_inventory_id = ""
-                STATE.notes = ""
-                STATE.checklist_state = {item: False for item in KIT_CHECKLIST}
-                STATE.set_command_result("Ready for the next board.")
+                reset_current_kit()
+                STATE.set_command_result("Current kit data cleared.")
                 self.send_json({"ok": True, "message": STATE.command_result})
                 return
             self.send_json({"ok": False, "error": "Unknown endpoint."}, status=HTTPStatus.NOT_FOUND)
@@ -817,13 +1092,22 @@ class ApiHandler(SimpleHTTPRequestHandler):
         STATE.set_command_result(STATE.setup_result)
 
     def handle_set_session(self, payload: dict[str, Any]) -> None:
-        STATE.current_inventory_id = str(payload.get("inventoryId") or "").strip()
+        kit_number = str(payload.get("inventoryId") or "").strip()
+        if kit_number and (not kit_number.isdigit() or len(kit_number) > 4):
+            raise RuntimeError("Kit number must be 1 to 4 digits.")
+        STATE.current_inventory_id = kit_number
+        STATE.current_inventory_name = str(payload.get("inventoryName") or "").strip()
         STATE.current_operator = str(payload.get("operator") or "").strip()
         STATE.notes = str(payload.get("notes") or "").strip()
         checklist = payload.get("checklist") or {}
         if isinstance(checklist, dict):
             for item in KIT_CHECKLIST:
+                if item == ARDUINO_CHECKLIST_ITEM and not board_test_has_run():
+                    STATE.checklist_state[item] = False
+                    continue
                 STATE.checklist_state[item] = bool(checklist.get(item, False))
+        if board_test_has_run():
+            STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
 
     def install_pyserial(self) -> str:
         STATE.set_busy(True, "Installing pyserial")
@@ -862,11 +1146,14 @@ class ApiHandler(SimpleHTTPRequestHandler):
 def main() -> None:
     ensure_data_dir()
     STATE.test_history = load_test_history()
+    STATE.test_metadata = load_test_metadata()
     STATE.log("info", "BLE Sense Test Station starting.")
     STATE.log("info", f"Serving UI from {STATIC_DIR}.")
     server = ThreadingHTTPServer((HOST, PORT), ApiHandler)
     url = f"http://{HOST}:{PORT}/"
     print(f"BLE Sense Test Station running at {url}")
+    print(f"Project root: {ROOT}")
+    print(f"Static UI: {STATIC_DIR}")
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()

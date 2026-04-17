@@ -19,6 +19,10 @@ html {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   color: var(--ink);
@@ -121,6 +125,24 @@ h1 {
   font-size: 1.05rem;
 }
 
+.metadata-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr)) auto;
+  gap: 14px;
+  align-items: start;
+}
+
+.metadata-summary strong,
+.metadata-notes p {
+  display: block;
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.metadata-notes {
+  grid-column: 1 / -2;
+}
+
 .panel {
   padding: 22px;
   margin-bottom: 18px;
@@ -132,6 +154,27 @@ h1 {
   gap: 16px;
   align-items: end;
   margin-bottom: 14px;
+}
+
+#statusText {
+  max-width: 62ch;
+  margin-bottom: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(255, 249, 239, 0.75);
+}
+
+#statusText.status-warning {
+  color: #7a4300;
+  background: rgba(183, 106, 16, 0.16);
+  border: 1px solid rgba(183, 106, 16, 0.35);
+}
+
+#statusText.status-error {
+  color: #7f1d1d;
+  background: rgba(163, 52, 52, 0.16);
+  border: 1px solid rgba(163, 52, 52, 0.38);
 }
 
 .controls-grid {
@@ -181,6 +224,13 @@ button.primary {
 
 button.primary:hover:enabled {
   background: var(--accent-strong);
+}
+
+button.small-action {
+  min-height: 34px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.9rem;
 }
 
 button:disabled,
@@ -369,13 +419,18 @@ code {
   grid-template-columns: repeat(2, minmax(220px, 1fr));
 }
 
+.kit-details-grid {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
 .field-wide {
   grid-column: 1 / -1;
 }
 
 .checklist-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -394,6 +449,16 @@ code {
   min-height: auto;
 }
 
+.check-item span {
+  display: grid;
+  gap: 4px;
+}
+
+.check-item small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .compact-actions {
   grid-template-columns: repeat(2, minmax(220px, 1fr));
 }
@@ -407,8 +472,13 @@ code {
   .hero,
   .controls-grid,
   .operator-grid,
+  .metadata-summary,
   .compact-actions {
     grid-template-columns: 1fr;
+  }
+
+  .metadata-notes {
+    grid-column: auto;
   }
 
   .hero-status {
