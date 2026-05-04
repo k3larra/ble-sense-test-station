@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kit Sets</title>
+  <link rel="stylesheet" href="./styles.css?v=20260504-1">
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">Teaching Kit Check</p>
+        <h1>Kit Sets</h1>
+        <p class="intro">Create, duplicate, edit and delete the checklist templates used by the BLE Sense test station.</p>
+      </div>
+      <div class="inline-actions">
+        <a class="button-link" href="./index.html">Back to Test Station</a>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Template Selection</h2>
+        <p>Each kit set must contain exactly one BLE Sense controller item.</p>
+      </div>
+      <div class="controls-grid kit-template-toolbar kit-template-toolbar-full">
+        <label class="field field-wide">
+          <span>Kit set</span>
+          <select id="kitTemplateSelect"></select>
+        </label>
+        <button id="newTemplateButton" type="button">New Kit Set</button>
+        <button id="duplicateTemplateButton" type="button">Duplicate</button>
+        <button id="deleteTemplateButton" type="button">Delete</button>
+      </div>
+      <div class="file-list small">
+        <div>Kit set file: <code id="kitTemplatesPath">-</code></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Kit Set Editor</h2>
+        <p>Choose severity per item and keep the BLE Sense board as the controller item.</p>
+      </div>
+      <div class="controls-grid operator-grid">
+        <label class="field">
+          <span>Kit set name</span>
+          <input id="templateNameInput" type="text" placeholder="For example Workshop kit A">
+        </label>
+        <label class="field field-wide">
+          <span>Description</span>
+          <textarea id="templateDescriptionInput" rows="2" placeholder="Optional notes about this kit set"></textarea>
+        </label>
+      </div>
+      <div id="templateItemsEditor" class="template-items-editor"></div>
+      <div class="controls-grid compact-actions">
+        <button id="addTemplateItemButton" type="button">Add Item</button>
+        <button id="saveTemplateButton" type="button" class="primary">Save Kit Set</button>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="deleteTemplateDialog" class="confirm-dialog">
+    <form method="dialog" class="confirm-dialog-body">
+      <h2>Delete Kit Set</h2>
+      <p id="deleteTemplateMessage">Do you really want to delete this kit set?</p>
+      <div class="inline-actions">
+        <button type="submit">Cancel</button>
+        <button id="confirmDeleteTemplateButton" type="button" class="primary">Delete</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./kit_sets.js?v=20260504-1"></script>
+</body>
+</html>

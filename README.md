@@ -15,15 +15,16 @@ This repository is now arranged so a teaching assistant can start one local tool
    - test name
    - test responsible
    - test notes
-4. Fill in the kit details:
+4. Choose the active kit set, or edit the kit set if the lab setup has changed.
+5. Fill in the kit details:
    - kit number
    - kit name
    - operator
    - kit notes
-5. Tick the kit checklist items that are present.
-6. Plug in an Arduino Nano 33 BLE Sense and choose the detected serial port.
-7. Tick the Arduino checklist row if the Arduino should be tested as part of the save step.
-8. Click `Run test and save results`.
+6. Tick the kit checklist items that are present.
+7. Plug in an Arduino Nano 33 BLE Sense and choose the detected serial port.
+8. Tick the BLE Sense checklist row if that board belongs to the kit and should be tested.
+9. Click `Run test and save results`.
 
 The local runner will:
 
@@ -45,17 +46,40 @@ You can also click `Test Arduino` to run only the Arduino upload/connect test wi
 
 The `Reset` button clears the current kit details, checklist, live sensor state and edit state. It does not delete previously saved result files.
 
+## Kit sets
+
+Kit sets are editable checklist templates stored in `test_records/kit_templates.json`.
+
+Each kit set contains:
+
+- exactly one BLE Sense controller item, which always requires a hardware test before the kit can pass
+- any number of normal component items
+- a severity for each item:
+  - `critical`: if missing, the result becomes `FAIL`
+  - `missing`: if missing, the result becomes `KIT-INCOMPLETE`
+  - `optional`: recorded as missing, but does not lower the result
+
+You can create, duplicate, edit and delete kit sets in the UI. The active kit set applies to the current batch entry and controls which checklist items are shown.
+
 ## Test metadata and reports
 
 Saved test data is stored in `test_records/` on the local machine:
 
 - `test_metadata.json`: batch-level test name, responsible person, notes and saved date
+- `kit_templates.json`: editable kit set definitions
 - `board_tests.json`: full saved kit records
 - `board_tests.csv`: spreadsheet-friendly saved kit summary
 
 The metadata form is shown when no kit records exist and metadata has not been saved yet. Once saved, the metadata is visible in the UI and can be edited with `Edit Test Metadata`.
 
 Test records and metadata are machine-local and are not included in the repo by default.
+
+Saved kit results now include:
+
+- the kit set used for the test
+- grouped missing items by severity
+- the BLE Sense board hardware ID when available
+- sensor summary and detailed sensor readings
 
 ## What the status colors mean
 

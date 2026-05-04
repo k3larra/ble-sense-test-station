@@ -4,15 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BLE Sense Test Station</title>
-  <link rel="stylesheet" href="./styles.css?v=20260417-6">
+  <link rel="stylesheet" href="./styles.css?v=20260422-1">
 </head>
 <body>
   <main class="page">
     <section class="hero">
-      <div>
+      <div class="hero-banner">
+        <div class="hero-branding">
+          <img class="hero-logo hero-logo-ioio" src="./ioio-logo-white-1024x419.png" alt="IOIO">
+          <img class="hero-logo hero-logo-mau" src="./malmo-university-logo.png" alt="Malmo University">
+        </div>
+      </div>
+      <div class="hero-copy">
         <p class="eyebrow">Teaching Kit Check</p>
-        <h1>BLE Sense Batch Test Station <span id="appVersion" class="version-pill">v1.0</span></h1>
-        <p class="intro">A standalone operator workflow for batch testing BLE Sense teaching kits, saving results, and exporting a report.</p>
+        <h1>BLE Sense Batch Test Station</h1>
+        <p class="intro">Batch testing, Arduino verification, checklist completion and result export in one local tool.</p>
       </div>
       <div class="hero-status">
         <div class="metric">
@@ -28,8 +34,12 @@
           <strong id="lastDataAt">None</strong>
         </div>
         <div class="metric">
-          <span class="metric-label">Detected revision</span>
+          <span class="metric-label">Revision</span>
           <strong id="detectedRevision">Unknown</strong>
+        </div>
+        <div class="metric metric-version">
+          <span class="metric-label">Version</span>
+          <strong id="appVersion">v1.0</strong>
         </div>
       </div>
     </section>
@@ -76,6 +86,58 @@
       </div>
     </section>
 
+    <section class="panel" id="kitTemplatePanel">
+      <div class="panel-head">
+        <h2>Kit Sets</h2>
+        <p>Select the checklist for this batch.</p>
+      </div>
+      <div class="controls-grid kit-template-toolbar">
+        <label class="field field-wide">
+          <span>Active kit set</span>
+          <select id="kitTemplateSelect"></select>
+        </label>
+        <button id="editKitSetsButton" type="button">Edit Kit Sets</button>
+      </div>
+      <div class="file-list small">
+        <div>Kit set file: <code id="kitTemplatesPath">-</code></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Batch Summary</h2>
+        <p>Running totals for this batch and where the report files are saved.</p>
+      </div>
+      <div id="historySummaryCards" class="summary-grid"></div>
+      <div class="file-list small">
+        <div>Running from: <code id="runningRoot">-</code></div>
+        <div>Metadata: <code id="metadataPath">-</code></div>
+        <div>JSON report: <code id="jsonPath">-</code></div>
+        <div>CSV report: <code id="csvPath">-</code></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Recent Saved Results</h2>
+        <p>The latest kits recorded in this batch.</p>
+      </div>
+      <table class="sensor-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Inventory</th>
+            <th>Name</th>
+            <th>Result</th>
+            <th>Revision</th>
+            <th>Missing kit items</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="recentTestsRows"></tbody>
+      </table>
+    </section>
+
     <section class="panel">
       <div class="panel-head">
         <h2>Kit Details and Checklist</h2>
@@ -99,66 +161,38 @@
           <textarea id="notesInput" rows="2" placeholder="Optional notes about this kit"></textarea>
         </label>
       </div>
+      <div class="controls-grid board-selection-grid">
+        <label class="field">
+          <span>Board port</span>
+          <select id="portSelect"></select>
+        </label>
+        <label class="field">
+          <span>Board revision</span>
+          <select id="revisionOverrideSelect">
+            <option value="auto">Auto (default Rev2)</option>
+            <option value="rev1">Rev1</option>
+            <option value="rev2">Rev2</option>
+          </select>
+        </label>
+        <button id="refreshPortsButton" type="button">Refresh Ports</button>
+      </div>
       <div id="checklistGrid" class="checklist-grid">
-        <label class="check-item">
-          <input type="checkbox" data-label="1 Arduino Nano 33 BLE Sense with headers">
-          <span>1 Arduino Nano 33 BLE Sense with headers</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="1 Breadboard">
-          <span>1 Breadboard</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="20 Connection wires">
-          <span>20 Connection wires</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="1 potentiometer / trimmer">
-          <span>1 potentiometer / trimmer</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="3 buttons / tactile switches">
-          <span>3 buttons / tactile switches</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="1 LED ring or stripe">
-          <span>1 LED ring or stripe</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="1 micro servo motor">
-          <span>1 micro servo motor</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="1 micro USB cable">
-          <span>1 micro USB cable</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="1 piezo speaker">
-          <span>1 piezo speaker</span>
-        </label>
-        <label class="check-item">
-          <input type="checkbox" data-label="5 Different color LEDs">
-          <span>5 Different color LEDs</span>
-        </label>
       </div>
       <div class="controls-grid compact-actions">
-        <button id="saveResultButton" type="button" class="primary">Run test and save results</button>
+        <button id="runKitTestButton" type="button" class="success">Run Test</button>
+        <button id="saveResultButton" type="button" class="primary">Save Results</button>
         <button id="nextBoardButton" type="button">Reset</button>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Quick Start</h2>
-        <p>Plug in a board, choose the port, then test the Arduino.</p>
+        <h2>Test Board Only</h2>
+        <p>Plug in a board, then run the BLE Sense test.</p>
       </div>
       <div class="controls-grid">
-        <label class="field">
-          <span>Board port</span>
-          <select id="portSelect"></select>
-        </label>
-        <button id="refreshPortsButton" type="button">Refresh Ports</button>
-        <button id="runFullTestButton" type="button" class="primary">Test Arduino</button>
+        <button id="runFullTestButton" type="button" class="primary">Test Board</button>
+        <button id="resetArduinoTestButton" type="button">Reset Board Test</button>
         <button id="uploadButton" type="button">Upload Only</button>
         <button id="connectButton" type="button">Connect Live Data</button>
         <button id="disconnectButton" type="button">Disconnect</button>
@@ -181,20 +215,6 @@
           <p id="sketchStatus">Checking...</p>
           <p class="small">Expected sketch: <code>sense_table_stream</code></p>
         </article>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
-        <h2>Batch Summary</h2>
-        <p>Running totals for this batch and where the report files are saved.</p>
-      </div>
-      <div id="historySummaryCards" class="summary-grid"></div>
-      <div class="file-list small">
-        <div>Running from: <code id="runningRoot">-</code></div>
-        <div>Metadata: <code id="metadataPath">-</code></div>
-        <div>JSON report: <code id="jsonPath">-</code></div>
-        <div>CSV report: <code id="csvPath">-</code></div>
       </div>
     </section>
 
@@ -227,27 +247,6 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Recent Saved Results</h2>
-        <p>The latest kits recorded in this batch.</p>
-      </div>
-      <table class="sensor-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Inventory</th>
-            <th>Name</th>
-            <th>Result</th>
-            <th>Revision</th>
-            <th>Missing kit items</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="recentTestsRows"></tbody>
-      </table>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
         <h2>Activity Log</h2>
         <p>Recent actions and errors from the local runner.</p>
       </div>
@@ -258,6 +257,17 @@
     </section>
   </main>
 
-  <script type="module" src="./app.js?v=20260417-6"></script>
+  <dialog id="deleteResultDialog" class="confirm-dialog">
+    <form method="dialog" class="confirm-dialog-body">
+      <h2>Delete Saved Result</h2>
+      <p id="deleteResultMessage">Do you really want to delete this saved result?</p>
+      <div class="inline-actions">
+        <button id="cancelDeleteResultButton" type="submit">Cancel</button>
+        <button id="confirmDeleteResultButton" type="button" class="primary">Delete</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="./app.js?v=20260422-1"></script>
 </body>
 </html>

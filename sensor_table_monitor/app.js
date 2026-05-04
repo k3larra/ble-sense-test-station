@@ -9,12 +9,14 @@ const summaryCards = document.querySelector("#summaryCards");
 const historySummaryCards = document.querySelector("#historySummaryCards");
 const logLines = document.querySelector("#logLines");
 const portSelect = document.querySelector("#portSelect");
+const revisionOverrideSelect = document.querySelector("#revisionOverrideSelect");
 const checklistGrid = document.querySelector("#checklistGrid");
 const recentTestsRows = document.querySelector("#recentTestsRows");
 const runningRoot = document.querySelector("#runningRoot");
 const metadataPath = document.querySelector("#metadataPath");
 const jsonPath = document.querySelector("#jsonPath");
 const csvPath = document.querySelector("#csvPath");
+const kitTemplatesPath = document.querySelector("#kitTemplatesPath");
 const testMetadataPrompt = document.querySelector("#testMetadataPrompt");
 const testMetadataSummary = document.querySelector("#testMetadataSummary");
 const testMetadataForm = document.querySelector("#testMetadataForm");
@@ -29,9 +31,10 @@ const inventoryIdInput = document.querySelector("#inventoryIdInput");
 const inventoryNameInput = document.querySelector("#inventoryNameInput");
 const operatorInput = document.querySelector("#operatorInput");
 const notesInput = document.querySelector("#notesInput");
-
 const refreshPortsButton = document.querySelector("#refreshPortsButton");
+const runKitTestButton = document.querySelector("#runKitTestButton");
 const runFullTestButton = document.querySelector("#runFullTestButton");
+const resetArduinoTestButton = document.querySelector("#resetArduinoTestButton");
 const uploadButton = document.querySelector("#uploadButton");
 const connectButton = document.querySelector("#connectButton");
 const disconnectButton = document.querySelector("#disconnectButton");
@@ -42,12 +45,16 @@ const saveTestMetadataButton = document.querySelector("#saveTestMetadataButton")
 const cancelTestMetadataEditButton = document.querySelector("#cancelTestMetadataEditButton");
 const saveResultButton = document.querySelector("#saveResultButton");
 const nextBoardButton = document.querySelector("#nextBoardButton");
-
 const arduinoCliStatus = document.querySelector("#arduinoCliStatus");
 const arduinoCliHelp = document.querySelector("#arduinoCliHelp");
 const pyserialStatus = document.querySelector("#pyserialStatus");
 const pyserialHelp = document.querySelector("#pyserialHelp");
 const sketchStatus = document.querySelector("#sketchStatus");
+const kitTemplateSelect = document.querySelector("#kitTemplateSelect");
+const editKitSetsButton = document.querySelector("#editKitSetsButton");
+const deleteResultDialog = document.querySelector("#deleteResultDialog");
+const deleteResultMessage = document.querySelector("#deleteResultMessage");
+const confirmDeleteResultButton = document.querySelector("#confirmDeleteResultButton");
 
 let pollTimer = null;
 let selectedPort = "";
@@ -61,6 +68,23 @@ let testMetadataDirty = false;
 let testMetadataEditing = false;
 let lastTestMetadata = null;
 let stickyStatus = null;
+let currentTemplates = [];
+let activeKitTemplateId = "";
+let pendingDeleteInventoryId = "";
+
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function createElement(tagName, options = {}) {
+  const element = document.createElement(tagName);
+  if (options.className) element.className = options.className;
+  if (options.text) element.textContent = options.text;
+  if (options.type) element.type = options.type;
+  if (options.value !== undefined) element.value = options.value;
+  if (options.placeholder) element.placeholder = options.placeholder;
+  return element;
+}
 
 function badgeClass(status) {
   if (status === "ok") return "status-ok";
@@ -74,6 +98,12 @@ function badgeLabel(status) {
   if (status === "needs-action") return "Needs action";
   if (status === "problem") return "Problem";
   return "Waiting";
+}
+
+function severityLabel(severity) {
+  if (severity === "critical") return "Critical";
+  if (severity === "optional") return "Optional";
+  return "Missing";
 }
 
 function setStatus(message, tone = "info") {
@@ -110,10 +140,6 @@ function renderTestMetadata(metadata = {}) {
   }
 }
 
-function hasInventoryIdentity() {
-  return Boolean(inventoryIdInput.value.trim());
-}
-
 function normalizeKitNumber() {
   const cleanValue = inventoryIdInput.value.replace(/\D/g, "").slice(0, 4);
   if (inventoryIdInput.value !== cleanValue) {
@@ -125,7 +151,7 @@ function normalizeKitNumber() {
 function kitNumberError() {
   const kitNumber = normalizeKitNumber();
   if (!kitNumber) {
-    return "Kit number is missing. Enter the kit number in Kit Details, then press Run test and save results again.";
+    return "Kit number is missing. Enter the kit number in Kit Details, then run the test or save the result again.";
   }
   if (usedKitNumbers.has(kitNumber) && kitNumber !== editingInventoryId) {
     return `Kit number ${kitNumber} has already been saved in this batch. Use a different kit number or update the saved kit instead.`;
@@ -157,32 +183,30 @@ function scheduleKitNumberCheck() {
         };
         setStatus(stickyStatus.message, stickyStatus.tone);
       }
-    } catch (error) {
-      // The save action still validates server-side. Keep typing responsive if this check fails.
+    } catch (_error) {
+      // Server-side validation still runs during save.
     }
   }, 250);
 }
 
-function bindChecklistInputs() {
-  checklistGrid.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
-    checklistState[checkbox.dataset.label] = checkbox.checked;
-    checkbox.addEventListener("change", (event) => {
-      const input = event.currentTarget;
-      checklistState[input.dataset.label] = input.checked;
-      checklistDirty = true;
-    });
-  });
-}
-
 function updateSaveResultState(isBusy = false) {
   saveResultButton.disabled = isBusy;
-  saveResultButton.textContent = editingInventoryId ? "Update saved result" : "Run test and save results";
+  saveResultButton.textContent = editingInventoryId ? "Update Saved Result" : "Save Results";
+  if (runKitTestButton) {
+    runKitTestButton.disabled = isBusy || !portSelect.value;
+  }
 }
 
 function updateTestMetadataButtonState(isBusy = false) {
   saveTestMetadataButton.disabled = isBusy;
   editTestMetadataButton.disabled = isBusy;
   cancelTestMetadataEditButton.disabled = isBusy;
+}
+
+function updateArduinoTestButtonState(isBusy = false) {
+  const checkbox = checklistGrid.querySelector("input[data-check-key='arduino']");
+  const isSelected = Boolean(checkbox?.checked);
+  resetArduinoTestButton.disabled = isBusy || !isSelected;
 }
 
 async function callApi(path, body = {}) {
@@ -207,17 +231,14 @@ function renderPorts(ports, connectedPort) {
   portSelect.innerHTML = "";
 
   if (!ports.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No serial ports found";
+    const option = createElement("option", { value: "", text: "No serial ports found" });
     portSelect.append(option);
     portSelect.disabled = true;
     return;
   }
 
   ports.forEach((port) => {
-    const option = document.createElement("option");
-    option.value = port.address;
+    const option = createElement("option", { value: port.address });
     const boardSuffix = port.board_name ? ` (${port.board_name})` : "";
     option.textContent = `${port.label}${boardSuffix}`;
     if (port.address === previous) option.selected = true;
@@ -227,51 +248,48 @@ function renderPorts(ports, connectedPort) {
   selectedPort = portSelect.value;
 }
 
+function renderSummaryCards(container, cards) {
+  container.innerHTML = "";
+  cards.forEach((card) => {
+    const article = createElement("article", { className: `summary-card ${card.tone}` });
+    const value = createElement("strong", { text: `${card.value}` });
+    const heading = createElement("h3", { text: card.label });
+    const note = createElement("p", { className: "small", text: card.note });
+    article.append(value, heading, note);
+    container.append(article);
+  });
+}
+
 function renderSummary(summary) {
-  summaryCards.innerHTML = "";
-  const cards = [
+  renderSummaryCards(summaryCards, [
     { label: "Verified", value: summary.ok || 0, tone: "ok", note: "Sensors returning data or verified activity." },
     { label: "Needs Action", value: summary["needs-action"] || 0, tone: "attention", note: "Usually gesture or microphone needs interaction." },
     { label: "Problems", value: summary.problem || 0, tone: "problem", note: "No reading where one is expected." },
     { label: "Waiting", value: summary.waiting || 0, tone: "neutral", note: "No board data yet." }
-  ];
-
-  cards.forEach((card) => {
-    const article = document.createElement("article");
-    article.className = `summary-card ${card.tone}`;
-    article.innerHTML = `<strong>${card.value}</strong><h3>${card.label}</h3><p class="small">${card.note}</p>`;
-    summaryCards.append(article);
-  });
+  ]);
 }
 
 function renderHistorySummary(summary) {
-  historySummaryCards.innerHTML = "";
-  const cards = [
+  renderSummaryCards(historySummaryCards, [
     { label: "Total", value: summary.total || 0, tone: "neutral", note: "Boards saved in this batch." },
-    { label: "Pass", value: summary.PASS || 0, tone: "ok", note: "All sensors good, kit complete." },
+    { label: "Pass", value: summary.PASS || 0, tone: "ok", note: "Board tested and kit complete." },
     { label: "Attention", value: summary.ATTENTION || 0, tone: "attention", note: "Board worked but needs human follow-up." },
-    { label: "Fail / Incomplete", value: (summary.FAIL || 0) + (summary["KIT-INCOMPLETE"] || 0), tone: "problem", note: "Sensor problem or missing kit parts." }
-  ];
-
-  cards.forEach((card) => {
-    const article = document.createElement("article");
-    article.className = `summary-card ${card.tone}`;
-    article.innerHTML = `<strong>${card.value}</strong><h3>${card.label}</h3><p class="small">${card.note}</p>`;
-    historySummaryCards.append(article);
-  });
+    { label: "Fail / Incomplete", value: (summary.FAIL || 0) + (summary["KIT-INCOMPLETE"] || 0), tone: "problem", note: "Critical issue or missing required parts." }
+  ]);
 }
 
 function renderSensors(sensors) {
   sensorRows.innerHTML = "";
   sensors.forEach((sensor) => {
     const row = document.createElement("tr");
-    row.innerHTML = `
-      <td>${sensor.label}</td>
-      <td>${sensor.model}</td>
-      <td><span class="status-badge ${badgeClass(sensor.status)}">${badgeLabel(sensor.status)}</span></td>
-      <td class="value-cell">${sensor.value}</td>
-      <td>${sensor.statusNote}</td>
-    `;
+    const labelCell = createElement("td", { text: sensor.label });
+    const modelCell = createElement("td", { text: sensor.model });
+    const statusCell = document.createElement("td");
+    const statusBadge = createElement("span", { className: `status-badge ${badgeClass(sensor.status)}`, text: badgeLabel(sensor.status) });
+    statusCell.append(statusBadge);
+    const valueCell = createElement("td", { className: "value-cell", text: sensor.value });
+    const noteCell = createElement("td", { text: sensor.statusNote });
+    row.append(labelCell, modelCell, statusCell, valueCell, noteCell);
     sensorRows.append(row);
   });
 }
@@ -279,13 +297,12 @@ function renderSensors(sensors) {
 function renderLogs(logs) {
   logLines.innerHTML = "";
   logs.slice(-40).reverse().forEach((line) => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "log-line";
-    wrapper.innerHTML = `
-      <time>${line.time}</time>
-      <span class="level">${line.level}</span>
-      <span>${line.message}</span>
-    `;
+    const wrapper = createElement("div", { className: "log-line" });
+    wrapper.append(
+      createElement("time", { text: line.time }),
+      createElement("span", { className: "level", text: line.level }),
+      createElement("span", { text: line.message })
+    );
     logLines.append(wrapper);
   });
 }
@@ -301,58 +318,167 @@ function renderRequirements(status) {
   sketchStatus.textContent = status.requirements.sketchFound ? "Found." : "Missing sketch folder.";
 }
 
+function bindChecklistInputs() {
+  checklistGrid.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checklistState[checkbox.dataset.itemId] = checkbox.checked;
+    checkbox.addEventListener("change", (event) => {
+      const input = event.currentTarget;
+      if (input.dataset.checkKey === "arduino") {
+        handleArduinoCheckboxChange(input);
+        return;
+      }
+      checklistState[input.dataset.itemId] = input.checked;
+      checklistDirty = true;
+    });
+  });
+}
+
 function renderChecklist(checklist) {
   checklistGrid.innerHTML = "";
   if (!checklistDirty) {
     checklistState = {};
   }
+
   checklist.forEach((item) => {
     if (!checklistDirty || item.autoPresent || item.key === "arduino") {
-      checklistState[item.label] = Boolean(item.present);
+      checklistState[item.id] = Boolean(item.present);
     }
-    const isPresent = Boolean(checklistState[item.label]);
-    const label = document.createElement("label");
-    label.className = "check-item";
-    label.innerHTML = `
-      <input
-        type="checkbox"
-        ${isPresent ? "checked" : ""}
-        data-label="${item.label}"
-        data-check-key="${item.key || ""}"
-        data-auto-present="${item.autoPresent ? "true" : ""}">
-      <span>
-        ${item.label}
-        ${item.detail ? `<small>${item.detail}</small>` : ""}
-      </span>
-    `;
-    checklistGrid.append(label);
+
+    const row = createElement("label", { className: "check-item" });
+    const checkbox = createElement("input", { type: "checkbox" });
+    checkbox.checked = Boolean(checklistState[item.id]);
+    checkbox.dataset.itemId = item.id;
+    checkbox.dataset.checkKey = item.key || "";
+    checkbox.dataset.testCompleted = item.testCompleted ? "true" : "";
+    row.append(checkbox);
+
+    const content = createElement("span");
+    const labelRow = createElement("span", { className: "check-item-main" });
+    labelRow.append(createElement("strong", { text: item.label }));
+    labelRow.append(createElement("span", { className: `severity-badge severity-${item.severity}`, text: severityLabel(item.severity) }));
+    if (item.kind === "controller") {
+      labelRow.append(createElement("span", { className: "kind-badge", text: "BLE Sense Test" }));
+    }
+    content.append(labelRow);
+    if (item.detail) {
+      content.append(createElement("small", { text: item.detail }));
+    }
+    row.append(content);
+    checklistGrid.append(row);
   });
 
   bindChecklistInputs();
+}
+
+function formatMissingSummary(row) {
+  const critical = Array.isArray(row.missing_critical_items) ? row.missing_critical_items : [];
+  const standard = Array.isArray(row.missing_standard_items) ? row.missing_standard_items : [];
+  const optional = Array.isArray(row.missing_optional_items) ? row.missing_optional_items : [];
+  const parts = [];
+  if (critical.length) parts.push(`Critical: ${critical.join(", ")}`);
+  if (standard.length) parts.push(`Missing: ${standard.join(", ")}`);
+  if (optional.length) parts.push(`Optional: ${optional.join(", ")}`);
+  return parts.join(" | ") || "-";
 }
 
 function renderRecentTests(rows) {
   recentTestsRows.innerHTML = "";
   rows.slice().reverse().forEach((row) => {
     const tr = document.createElement("tr");
-    const missing = Array.isArray(row.missing_items) ? row.missing_items.join(", ") : "";
     const inventoryId = row.inventory_id || "";
-    tr.innerHTML = `
-      <td>${row.tested_at || ""}</td>
-      <td>${inventoryId}</td>
-      <td>${row.inventory_name || ""}</td>
-      <td>${row.result || ""}</td>
-      <td>${row.revision || ""}</td>
-      <td>${missing || "-"}</td>
-      <td><button type="button" class="small-action" data-edit-kit="${inventoryId}">Update</button></td>
-    `;
+    [
+      row.tested_at || "",
+      inventoryId,
+      row.inventory_name || "",
+      row.result || "",
+      row.revision || "",
+      formatMissingSummary(row)
+    ].forEach((value) => tr.append(createElement("td", { text: value })));
+    const actionCell = document.createElement("td");
+    const actions = createElement("div", { className: "table-actions" });
+    const updateButton = createElement("button", { className: "small-action", type: "button", text: "Update" });
+    updateButton.dataset.editKit = inventoryId;
+    const deleteButton = createElement("button", { className: "small-action danger-action", type: "button", text: "Delete" });
+    deleteButton.dataset.deleteKit = inventoryId;
+    actions.append(updateButton, deleteButton);
+    actionCell.append(actions);
+    tr.append(actionCell);
     recentTestsRows.append(tr);
   });
+}
+
+function renderKitTemplateSelect(templates, selectedId) {
+  kitTemplateSelect.innerHTML = "";
+  templates.forEach((template) => {
+    const option = createElement("option", { value: template.id, text: template.name });
+    if (template.id === selectedId) option.selected = true;
+    kitTemplateSelect.append(option);
+  });
+}
+
+function currentSessionPayload() {
+  return {
+    inventoryId: inventoryIdInput.value.trim(),
+    inventoryName: inventoryNameInput?.value.trim() || "",
+    operator: operatorInput.value.trim(),
+    notes: notesInput.value.trim(),
+    revisionOverride: revisionOverrideSelect?.value || "auto",
+    checklist: checklistState,
+    kitTemplateId: activeKitTemplateId
+  };
+}
+
+function currentTestMetadataPayload() {
+  return {
+    testName: testNameInput.value.trim(),
+    testResponsible: testResponsibleInput.value.trim(),
+    notes: testMetadataNotesInput.value.trim()
+  };
+}
+
+async function testArduino() {
+  if (!getSelectedPort()) {
+    throw new Error("Select a board port before testing the Arduino.");
+  }
+  await callApi("/api/request-arduino-test");
+  await callApi("/api/set-session", currentSessionPayload());
+  sessionDirty = false;
+  checklistDirty = false;
+  setStatus("Preparing, uploading and connecting.");
+  const result = await callApi("/api/run-full-test", { port: getSelectedPort() });
+  setStatus(result.message);
+}
+
+function shouldRunArduinoBeforeSave() {
+  const checkbox = checklistGrid.querySelector("input[data-check-key='arduino']");
+  return Boolean(checkbox?.checked && checkbox.dataset.testCompleted !== "true");
+}
+
+function handleArduinoCheckboxChange(input) {
+  if (input.checked) {
+    checklistState[input.dataset.itemId] = true;
+    checklistDirty = true;
+    runAction(async () => {
+      const result = await callApi("/api/request-arduino-test");
+      setStatus(result.message);
+    });
+    return;
+  }
+  input.checked = true;
+  checklistState[input.dataset.itemId] = true;
+  stickyStatus = {
+    message: "Use Reset Arduino Test if you want to clear the BLE Sense test flag and run the test again.",
+    tone: "warning"
+  };
+  setStatus(stickyStatus.message, stickyStatus.tone);
 }
 
 function renderStatus(status) {
   usedKitNumbers = new Set(status.usedKitNumbers || []);
   editingInventoryId = status.editingInventoryId || "";
+  currentTemplates = cloneData(status.kitTemplates || []);
+  activeKitTemplateId = status.activeKitTemplateId || "";
+
   currentTask.textContent = status.currentTask;
   snapshotCount.textContent = `${status.snapshotCount}`;
   lastDataAt.textContent = status.lastDataAt || "None";
@@ -370,29 +496,37 @@ function renderStatus(status) {
   renderLogs(status.logs);
   renderChecklist(status.inventory.checklist);
   renderRecentTests(status.recentTests || []);
+  renderKitTemplateSelect(currentTemplates, activeKitTemplateId);
 
   if (!sessionDirty) {
     inventoryIdInput.value = status.inventory.inventoryId || "";
     if (inventoryNameInput) inventoryNameInput.value = status.inventory.inventoryName || "";
     operatorInput.value = status.inventory.operator || "";
     notesInput.value = status.inventory.notes || "";
+    if (revisionOverrideSelect) revisionOverrideSelect.value = status.revisionOverride || "auto";
   }
+
   if (runningRoot) runningRoot.textContent = status.app.root || "-";
   if (metadataPath) metadataPath.textContent = status.historyFiles.metadata || "-";
-  jsonPath.textContent = status.historyFiles.json || "-";
-  csvPath.textContent = status.historyFiles.csv || "-";
+  if (jsonPath) jsonPath.textContent = status.historyFiles.json || "-";
+  if (csvPath) csvPath.textContent = status.historyFiles.csv || "-";
+  if (kitTemplatesPath) kitTemplatesPath.textContent = status.historyFiles.kitTemplates || "-";
 
   const busy = Boolean(status.busy);
   refreshPortsButton.disabled = busy;
+  revisionOverrideSelect.disabled = busy;
   runFullTestButton.disabled = busy || !portSelect.value;
   uploadButton.disabled = busy || !portSelect.value;
   connectButton.disabled = busy || !portSelect.value || status.serialConnected;
   disconnectButton.disabled = busy || !status.serialConnected;
   setupButton.disabled = busy;
   installPyserialButton.disabled = busy || status.requirements.pyserialFound;
+  nextBoardButton.disabled = busy;
   updateTestMetadataButtonState(busy);
   updateSaveResultState(busy);
-  nextBoardButton.disabled = busy;
+  updateArduinoTestButtonState(busy);
+  kitTemplateSelect.disabled = busy;
+  if (editKitSetsButton) editKitSetsButton.disabled = busy;
 
   if (stickyStatus) {
     setStatus(stickyStatus.message, stickyStatus.tone);
@@ -409,7 +543,7 @@ function renderStatus(status) {
   } else if (!status.ports.length) {
     setStatus("No serial ports detected. Plug in a board and refresh ports.", "warning");
   } else if (!status.serialConnected) {
-    setStatus("Board detected. Run the full test or connect to live data.");
+    setStatus("Board detected. Run the BLE Sense test or connect to live data.");
   } else {
     setStatus("Live data is active. Save the result when you are done.");
   }
@@ -420,7 +554,7 @@ async function refreshStatus() {
     const response = await fetch("/api/status", { cache: "no-store" });
     const status = await response.json();
     renderStatus(status);
-  } catch (error) {
+  } catch (_error) {
     setStatus("Could not reach the local Python runner. The checklist is still available, but saving needs the launcher running.", "error");
     updateSaveResultState(false);
   }
@@ -442,44 +576,9 @@ async function runAction(action) {
   }
 }
 
-function currentSessionPayload() {
-  return {
-    inventoryId: inventoryIdInput.value.trim(),
-    inventoryName: inventoryNameInput?.value.trim() || "",
-    operator: operatorInput.value.trim(),
-    notes: notesInput.value.trim(),
-    checklist: checklistState
-  };
-}
-
-function currentTestMetadataPayload() {
-  return {
-    testName: testNameInput.value.trim(),
-    testResponsible: testResponsibleInput.value.trim(),
-    notes: testMetadataNotesInput.value.trim()
-  };
-}
-
-async function testArduino() {
-  if (!getSelectedPort()) {
-    throw new Error("Select a board port before testing the Arduino.");
-  }
-  await callApi("/api/set-session", currentSessionPayload());
-  sessionDirty = false;
-  checklistDirty = false;
-  setStatus("Preparing, uploading and connecting.");
-  const result = await callApi("/api/run-full-test", { port: getSelectedPort() });
-  setStatus(result.message);
-}
-
-function shouldRunArduinoBeforeSave() {
-  const checkbox = checklistGrid.querySelector("input[data-check-key='arduino']");
-  return Boolean(checkbox?.checked && !checkbox.dataset.autoPresent);
-}
-
-refreshPortsButton.addEventListener("click", refreshStatus);
-portSelect.addEventListener("change", () => {
-  selectedPort = portSelect.value;
+revisionOverrideSelect?.addEventListener("change", () => {
+  stickyStatus = null;
+  sessionDirty = true;
 });
 
 [testNameInput, testResponsibleInput, testMetadataNotesInput].forEach((input) => {
@@ -521,6 +620,21 @@ saveTestMetadataButton.addEventListener("click", async () => {
     updateSaveResultState(false);
   });
 });
+
+kitTemplateSelect.addEventListener("change", async () => {
+  await runAction(async () => {
+    const result = await callApi("/api/templates/select", { templateId: kitTemplateSelect.value });
+    sessionDirty = false;
+    checklistDirty = false;
+    setStatus(result.message);
+  });
+});
+
+if (editKitSetsButton) {
+  editKitSetsButton.addEventListener("click", () => {
+    window.location.href = "./kit_sets.html";
+  });
+}
 
 setupButton.addEventListener("click", async () => {
   await runAction(async () => {
@@ -567,6 +681,22 @@ runFullTestButton.addEventListener("click", async () => {
   });
 });
 
+if (runKitTestButton) {
+  runKitTestButton.addEventListener("click", async () => {
+    await runAction(async () => {
+      await testArduino();
+    });
+  });
+}
+
+resetArduinoTestButton.addEventListener("click", async () => {
+  await runAction(async () => {
+    const result = await callApi("/api/reset-arduino-test");
+    checklistDirty = false;
+    setStatus(result.message);
+  });
+});
+
 saveResultButton.addEventListener("click", async () => {
   await runAction(async () => {
     const validationError = kitNumberError();
@@ -574,11 +704,10 @@ saveResultButton.addEventListener("click", async () => {
       throw new Error(validationError);
     }
     if (shouldRunArduinoBeforeSave()) {
-      await testArduino();
-    } else {
-      setStatus("Saving result for this kit.");
-      await callApi("/api/set-session", currentSessionPayload());
+      throw new Error("Run the BLE Sense test before saving this kit.");
     }
+    setStatus("Saving result for this kit.");
+    await callApi("/api/set-session", currentSessionPayload());
     sessionDirty = false;
     checklistDirty = false;
     const result = await callApi("/api/record-result", { update: Boolean(editingInventoryId) });
@@ -587,18 +716,43 @@ saveResultButton.addEventListener("click", async () => {
 });
 
 recentTestsRows.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-edit-kit]");
-  if (!button) return;
-  await runAction(async () => {
-    const inventoryId = button.dataset.editKit || "";
-    setStatus(`Loading kit ${inventoryId} for update.`);
-    const result = await callApi("/api/edit-result", { inventoryId });
-    sessionDirty = false;
-    checklistDirty = false;
-    setStatus(result.message);
-    document.querySelector("#statusText").scrollIntoView({ behavior: "smooth", block: "center" });
-  });
+  const editButton = event.target.closest("[data-edit-kit]");
+  if (editButton) {
+    await runAction(async () => {
+      const inventoryId = editButton.dataset.editKit || "";
+      setStatus(`Loading kit ${inventoryId} for update.`);
+      const result = await callApi("/api/edit-result", { inventoryId });
+      sessionDirty = false;
+      checklistDirty = false;
+      setStatus(result.message);
+      document.querySelector("#statusText").scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-kit]");
+  if (!deleteButton || !deleteResultDialog) return;
+  pendingDeleteInventoryId = deleteButton.dataset.deleteKit || "";
+  deleteResultMessage.textContent = `Do you really want to delete the saved result for kit ${pendingDeleteInventoryId}?`;
+  deleteResultDialog.showModal();
 });
+
+if (confirmDeleteResultButton && deleteResultDialog) {
+  confirmDeleteResultButton.addEventListener("click", async () => {
+    const inventoryId = pendingDeleteInventoryId;
+    deleteResultDialog.close();
+    if (!inventoryId) return;
+    await runAction(async () => {
+      const result = await callApi("/api/delete-result", { inventoryId });
+      sessionDirty = false;
+      checklistDirty = false;
+      pendingDeleteInventoryId = "";
+      setStatus(result.message);
+    });
+  });
+  deleteResultDialog.addEventListener("close", () => {
+    pendingDeleteInventoryId = "";
+  });
+}
 
 nextBoardButton.addEventListener("click", async () => {
   await runAction(async () => {
@@ -609,8 +763,11 @@ nextBoardButton.addEventListener("click", async () => {
   });
 });
 
+portSelect.addEventListener("change", () => {
+  selectedPort = portSelect.value;
+});
+
 async function startPolling() {
-  bindChecklistInputs();
   await refreshStatus();
   pollTimer = window.setInterval(refreshStatus, 1500);
 }

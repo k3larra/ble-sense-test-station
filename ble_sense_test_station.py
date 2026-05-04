@@ -1,5 +1,6 @@
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,7 @@ DATA_DIR = ROOT / "test_records"
 RESULTS_JSON = DATA_DIR / "board_tests.json"
 RESULTS_CSV = DATA_DIR / "board_tests.csv"
 TEST_METADATA_JSON = DATA_DIR / "test_metadata.json"
+KIT_TEMPLATES_JSON = DATA_DIR / "kit_templates.json"
 HOST = "127.0.0.1"
 PORT = 8765
 APP_VERSION = "1.2"
@@ -72,19 +74,33 @@ SENSOR_DEFINITIONS = [
     {"key": "microphone", "label": "Microphone", "model": "MP34DT05", "note": "Clap or tap near the board"},
 ]
 
-KIT_CHECKLIST = [
-    "1 Arduino Nano 33 BLE Sense with headers",
-    "1 Breadboard",
-    "20 Connection wires",
-    "1 potentiometer / trimmer",
-    "3 buttons / tactile switches",
-    "1 LED ring or stripe",
-    "1 micro servo motor",
-    "1 micro USB cable",
-    "1 piezo speaker",
-    "5 Different color LEDs",
+ITEM_SEVERITIES = {"critical", "missing", "optional"}
+ITEM_KINDS = {"component", "controller"}
+DEFAULT_KIT_TEMPLATES = [
+    {
+        "id": "ble-sense-standard",
+        "name": "BLE Sense Standard Kit",
+        "description": "Default teaching kit for BLE Sense checks.",
+        "items": [
+            {
+                "id": "ble-sense-board",
+                "label": "1 Arduino Nano 33 BLE Sense with headers",
+                "kind": "controller",
+                "severity": "critical",
+                "requires_test": True,
+            },
+            {"id": "breadboard", "label": "1 Breadboard", "kind": "component", "severity": "missing"},
+            {"id": "connection-wires", "label": "20 Connection wires", "kind": "component", "severity": "missing"},
+            {"id": "potentiometer", "label": "1 potentiometer / trimmer", "kind": "component", "severity": "missing"},
+            {"id": "buttons", "label": "3 buttons / tactile switches", "kind": "component", "severity": "missing"},
+            {"id": "led-ring", "label": "1 LED ring or stripe", "kind": "component", "severity": "missing"},
+            {"id": "servo", "label": "1 micro servo motor", "kind": "component", "severity": "missing"},
+            {"id": "usb-cable", "label": "1 micro USB cable", "kind": "component", "severity": "critical"},
+            {"id": "piezo", "label": "1 piezo speaker", "kind": "component", "severity": "optional"},
+            {"id": "color-leds", "label": "5 Different color LEDs", "kind": "component", "severity": "optional"},
+        ],
+    }
 ]
-ARDUINO_CHECKLIST_ITEM = KIT_CHECKLIST[0]
 
 
 @dataclass
@@ -103,6 +119,8 @@ class AppState:
     busy: bool = False
     current_task: str = "Idle"
     ports: list[dict[str, Any]] = field(default_factory=list)
+    kit_templates: list[dict[str, Any]] = field(default_factory=list)
+    active_template_id: str = ""
     connected_port: str | None = None
     serial_thread: threading.Thread | None = None
     serial_stop: threading.Event = field(default_factory=threading.Event)
@@ -111,6 +129,7 @@ class AppState:
     last_snapshot: dict[str, Any] | None = None
     current_board_uid: str | None = None
     current_port_hwid: str | None = None
+    arduino_test_requested: bool = False
     board_test_run: bool = False
     snapshot_count: int = 0
     last_data_at: str | None = None
@@ -118,12 +137,14 @@ class AppState:
     setup_result: str | None = None
     command_result: str | None = None
     detected_revision: str | None = None
+    revision_override: str = "auto"
     current_inventory_id: str = ""
     current_inventory_name: str = ""
     current_operator: str = ""
-    checklist_state: dict[str, bool] = field(default_factory=lambda: {item: False for item in KIT_CHECKLIST})
+    checklist_state: dict[str, bool] = field(default_factory=dict)
     notes: str = ""
     editing_inventory_id: str = ""
+    editing_saved_board_uid: str = ""
     test_history: list[dict[str, Any]] = field(default_factory=list)
     test_metadata: dict[str, str] = field(default_factory=dict)
     sensor_state: dict[str, SensorTracker] = field(
@@ -164,6 +185,182 @@ def value_is_number(value: Any) -> bool:
 
 def ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def slugify(text: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower()).strip("-")
+    return slug or fallback
+
+
+def unique_slug(base: str, existing: set[str]) -> str:
+    candidate = base
+    index = 2
+    while candidate in existing:
+        candidate = f"{base}-{index}"
+        index += 1
+    return candidate
+
+
+def default_kit_templates() -> list[dict[str, Any]]:
+    return json.loads(json.dumps(DEFAULT_KIT_TEMPLATES))
+
+
+def normalize_template_item(item: Any, existing_ids: set[str], index: int) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise RuntimeError("Each template item must be an object.")
+    label = str(item.get("label") or "").strip()
+    if not label:
+        raise RuntimeError("Each template item must have a label.")
+    kind = str(item.get("kind") or "component").strip().lower()
+    if kind not in ITEM_KINDS:
+        raise RuntimeError(f"Invalid item kind for '{label}'.")
+    severity = str(item.get("severity") or "missing").strip().lower()
+    if severity not in ITEM_SEVERITIES:
+        raise RuntimeError(f"Invalid severity for '{label}'.")
+    fallback_id = f"item-{index + 1}"
+    item_id = slugify(str(item.get("id") or label), fallback_id)
+    item_id = unique_slug(item_id, existing_ids)
+    existing_ids.add(item_id)
+    requires_test = kind == "controller"
+    return {
+        "id": item_id,
+        "label": label,
+        "kind": kind,
+        "severity": severity,
+        "requires_test": requires_test,
+    }
+
+
+def normalize_kit_template(template: Any, existing_ids: set[str], index: int) -> dict[str, Any]:
+    if not isinstance(template, dict):
+        raise RuntimeError("Each kit template must be an object.")
+    name = str(template.get("name") or "").strip()
+    if not name:
+        raise RuntimeError("Each kit template must have a name.")
+    fallback_id = f"kit-template-{index + 1}"
+    template_id = slugify(str(template.get("id") or name), fallback_id)
+    template_id = unique_slug(template_id, existing_ids)
+    existing_ids.add(template_id)
+    description = str(template.get("description") or "").strip()
+    raw_items = template.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        raise RuntimeError(f"Kit template '{name}' must include at least one item.")
+    item_ids: set[str] = set()
+    items = [normalize_template_item(item, item_ids, item_index) for item_index, item in enumerate(raw_items)]
+    controllers = [item for item in items if item["kind"] == "controller"]
+    if len(controllers) != 1:
+        raise RuntimeError(f"Kit template '{name}' must contain exactly one controller item.")
+    controllers[0]["requires_test"] = True
+    return {
+        "id": template_id,
+        "name": name,
+        "description": description,
+        "items": items,
+    }
+
+
+def normalize_kit_templates(payload: Any) -> list[dict[str, Any]]:
+    raw_templates = payload.get("templates") if isinstance(payload, dict) else payload
+    if not isinstance(raw_templates, list) or not raw_templates:
+        raise RuntimeError("At least one kit template is required.")
+    existing_ids: set[str] = set()
+    return [normalize_kit_template(template, existing_ids, index) for index, template in enumerate(raw_templates)]
+
+
+def persist_kit_templates(templates: list[dict[str, Any]]) -> None:
+    ensure_data_dir()
+    KIT_TEMPLATES_JSON.write_text(json.dumps({"templates": templates}, indent=2), encoding="utf-8")
+
+
+def load_kit_templates() -> list[dict[str, Any]]:
+    ensure_data_dir()
+    if not KIT_TEMPLATES_JSON.exists():
+        templates = default_kit_templates()
+        persist_kit_templates(templates)
+        return templates
+    try:
+        payload = json.loads(KIT_TEMPLATES_JSON.read_text(encoding="utf-8"))
+        templates = normalize_kit_templates(payload)
+        persist_kit_templates(templates)
+        return templates
+    except Exception:
+        templates = default_kit_templates()
+        persist_kit_templates(templates)
+        return templates
+
+
+def get_template_by_id(template_id: str) -> dict[str, Any] | None:
+    normalized = template_id.strip()
+    return next((template for template in STATE.kit_templates if template["id"] == normalized), None)
+
+
+def get_active_template() -> dict[str, Any]:
+    if STATE.active_template_id:
+        match = get_template_by_id(STATE.active_template_id)
+        if match:
+            return match
+    if not STATE.kit_templates:
+        STATE.kit_templates = default_kit_templates()
+    template = STATE.kit_templates[0]
+    STATE.active_template_id = template["id"]
+    return template
+
+
+def get_controller_item(template: dict[str, Any] | None = None) -> dict[str, Any]:
+    active_template = template or get_active_template()
+    controller = next((item for item in active_template["items"] if item["kind"] == "controller"), None)
+    if not controller:
+        raise RuntimeError(f"Kit template '{active_template['name']}' is missing its controller item.")
+    return controller
+
+
+def get_controller_item_id(template: dict[str, Any] | None = None) -> str:
+    return str(get_controller_item(template)["id"])
+
+
+def build_checklist_state(template: dict[str, Any], existing: dict[str, bool] | None = None) -> dict[str, bool]:
+    previous = existing or {}
+    return {str(item["id"]): bool(previous.get(str(item["id"]), False)) for item in template["items"]}
+
+
+def set_active_template(template_id: str) -> dict[str, Any]:
+    template = get_template_by_id(template_id)
+    if not template:
+        raise RuntimeError("Choose a valid kit set.")
+    STATE.active_template_id = template["id"]
+    STATE.checklist_state = build_checklist_state(template, STATE.checklist_state)
+    return template
+
+
+def save_template(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_template = payload.get("template")
+    templates = list(STATE.kit_templates)
+    target_id = str(payload.get("templateId") or (raw_template.get("id") if isinstance(raw_template, dict) else "") or "").strip()
+    if target_id:
+        templates = [template for template in templates if template["id"] != target_id]
+    normalized = normalize_kit_template(raw_template, {template["id"] for template in templates}, len(templates))
+    if target_id:
+        normalized["id"] = target_id
+    templates.append(normalized)
+    templates.sort(key=lambda item: item["name"].lower())
+    STATE.kit_templates = normalize_kit_templates({"templates": templates})
+    persist_kit_templates(STATE.kit_templates)
+    set_active_template(normalized["id"])
+    STATE.set_command_result(f"Saved kit set '{normalized['name']}'.")
+    return normalized
+
+
+def delete_template(template_id: str) -> None:
+    normalized = template_id.strip()
+    if len(STATE.kit_templates) <= 1:
+        raise RuntimeError("Keep at least one kit set.")
+    existing = get_template_by_id(normalized)
+    if not existing:
+        raise RuntimeError("Choose a valid kit set to delete.")
+    STATE.kit_templates = [template for template in STATE.kit_templates if template["id"] != normalized]
+    persist_kit_templates(STATE.kit_templates)
+    set_active_template(STATE.kit_templates[0]["id"])
+    STATE.set_command_result(f"Deleted kit set '{existing['name']}'.")
 
 
 def load_test_history() -> list[dict[str, Any]]:
@@ -253,6 +450,7 @@ def write_csv(rows: list[dict[str, Any]]) -> None:
         "tested_at",
         "inventory_id",
         "inventory_name",
+        "kit_template_name",
         "board_uid",
         "operator",
         "port",
@@ -262,7 +460,9 @@ def write_csv(rows: list[dict[str, Any]]) -> None:
         "needs_action_count",
         "problem_count",
         "waiting_count",
-        "missing_items",
+        "missing_critical_items",
+        "missing_standard_items",
+        "missing_optional_items",
         "notes",
     ]
     lines = [",".join(headers)]
@@ -293,6 +493,7 @@ def reset_sensor_trackers() -> None:
     STATE.last_snapshot = None
     STATE.current_board_uid = None
     STATE.current_port_hwid = None
+    STATE.arduino_test_requested = False
     STATE.board_test_run = False
     STATE.snapshot_count = 0
     STATE.last_data_at = None
@@ -306,7 +507,8 @@ def reset_current_kit() -> None:
     STATE.current_operator = ""
     STATE.notes = ""
     STATE.editing_inventory_id = ""
-    STATE.checklist_state = {item: False for item in KIT_CHECKLIST}
+    STATE.editing_saved_board_uid = ""
+    STATE.checklist_state = build_checklist_state(get_active_template())
 
 
 def get_python_command() -> list[str]:
@@ -430,6 +632,40 @@ def board_test_has_run() -> bool:
     return STATE.board_test_run or STATE.snapshot_count > 0 or bool(get_current_board_hardware_id())
 
 
+def arduino_test_is_selected() -> bool:
+    return STATE.arduino_test_requested or board_test_has_run()
+
+
+def request_arduino_test() -> None:
+    controller_item_id = get_controller_item_id()
+    STATE.arduino_test_requested = True
+    STATE.checklist_state[controller_item_id] = True
+
+
+def reset_arduino_test_flag() -> None:
+    disconnect_serial()
+    reset_sensor_trackers()
+    STATE.checklist_state[get_controller_item_id()] = False
+    STATE.set_command_result("Arduino test flag cleared. You can run the Arduino test again.")
+    STATE.log("info", "Arduino test flag cleared for the current kit.")
+
+
+def saved_board_test_available_for_edit() -> bool:
+    return bool(STATE.editing_inventory_id and STATE.editing_saved_board_uid)
+
+
+def get_arduino_checklist_detail(board_hardware_id: str) -> str:
+    if board_test_has_run():
+        return f"Hardware ID: {board_hardware_id}" if board_hardware_id else "Arduino test completed for this kit."
+    if STATE.arduino_test_requested:
+        return "Attach the board that belongs to this kit, then press Run test and save results or Test Arduino."
+    if saved_board_test_available_for_edit():
+        if STATE.editing_saved_board_uid:
+            return f"Saved board test on file. Check to retest. Last hardware ID: {STATE.editing_saved_board_uid}"
+        return "Saved board test on file. Check to retest with the board that belongs to this kit."
+    return ""
+
+
 def detect_board_revision(port: str | None) -> str:
     ports = list_serial_ports()
     if port:
@@ -443,6 +679,13 @@ def detect_board_revision(port: str | None) -> str:
             if "sense" in searchable:
                 return "rev1"
     return "rev2"
+
+
+def get_effective_revision(port: str | None) -> str:
+    override = str(STATE.revision_override or "auto").strip().lower()
+    if override in {"rev1", "rev2"}:
+        return override
+    return detect_board_revision(port)
 
 
 def get_installed_arduino_cores(cli: str) -> set[str]:
@@ -679,7 +922,7 @@ def serial_reader_loop(handle: Any, port: str) -> None:
             board_uid = str(payload.get("board_uid") or "").strip()
             if board_uid:
                 STATE.current_board_uid = board_uid
-            STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+            STATE.checklist_state[get_controller_item_id()] = True
             update_sensor_state(payload)
 
     disconnect_serial()
@@ -701,7 +944,7 @@ def connect_serial(port: str) -> str:
     STATE.connected_port = port
     STATE.current_port_hwid = get_port_hwid(port)
     STATE.board_test_run = True
-    STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+    STATE.checklist_state[get_controller_item_id()] = True
     STATE.serial_error = None
     thread = threading.Thread(target=serial_reader_loop, args=(handle, port), daemon=True)
     STATE.serial_thread = thread
@@ -716,13 +959,34 @@ def get_summary() -> dict[str, int]:
     return statuses
 
 
-def classify_result(summary: dict[str, int], checklist_state: dict[str, bool]) -> str:
+def classify_result(
+    summary: dict[str, int],
+    checklist_state: dict[str, bool],
+    template: dict[str, Any],
+    controller_checked: bool,
+    controller_tested: bool,
+) -> str:
+    items = {str(item["id"]): item for item in template["items"]}
+    missing_critical = [
+        item["label"]
+        for item_id, item in items.items()
+        if item["severity"] == "critical" and not checklist_state.get(item_id, False)
+    ]
+    missing_standard = [
+        item["label"]
+        for item_id, item in items.items()
+        if item["severity"] == "missing" and not checklist_state.get(item_id, False)
+    ]
+    if missing_critical:
+        return "FAIL"
+    if controller_checked and not controller_tested:
+        return "FAIL"
     if summary.get("problem", 0) > 0:
         return "FAIL"
+    if missing_standard:
+        return "KIT-INCOMPLETE"
     if summary.get("needs-action", 0) > 0:
         return "ATTENTION"
-    if not all(checklist_state.values()):
-        return "KIT-INCOMPLETE"
     return "PASS"
 
 
@@ -759,21 +1023,28 @@ def load_test_for_update(inventory_id: str) -> dict[str, Any]:
     if not record:
         raise RuntimeError(f"Kit number {kit_number} was not found in the saved results.")
 
+    disconnect_serial()
     reset_sensor_trackers()
     STATE.current_inventory_id = str(record.get("inventory_id") or "").strip()
     STATE.current_inventory_name = str(record.get("inventory_name") or "").strip()
     STATE.current_operator = str(record.get("operator") or "").strip()
     STATE.notes = str(record.get("notes") or "").strip()
+    template_id = str(record.get("kit_template_id") or "").strip()
+    if template_id:
+        set_active_template(template_id)
     STATE.detected_revision = str(record.get("revision") or "").strip() or None
     STATE.last_snapshot = record.get("last_snapshot")
+    STATE.editing_saved_board_uid = str(record.get("board_uid") or "").strip()
     checklist = record.get("checklist") or {}
+    STATE.checklist_state = build_checklist_state(get_active_template())
     if isinstance(checklist, dict):
-        for item in KIT_CHECKLIST:
-            STATE.checklist_state[item] = bool(checklist.get(item, False))
-    STATE.current_board_uid = str(record.get("board_uid") or "").strip() or None
-    if STATE.current_board_uid:
-        STATE.board_test_run = True
-        STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+        for item in get_active_template()["items"]:
+            item_id = str(item["id"])
+            STATE.checklist_state[item_id] = bool(checklist.get(item_id, False))
+    STATE.current_board_uid = None
+    STATE.arduino_test_requested = False
+    STATE.board_test_run = False
+    STATE.checklist_state[get_controller_item_id()] = False
 
     sensors = record.get("sensors") or {}
     if isinstance(sensors, dict):
@@ -792,6 +1063,9 @@ def load_test_for_update(inventory_id: str) -> dict[str, Any]:
 def record_current_test() -> dict[str, Any]:
     if not STATE.test_history and not metadata_is_saved():
         raise RuntimeError("Save test metadata before recording the first kit result.")
+    active_template = get_active_template()
+    controller_item = get_controller_item(active_template)
+    controller_item_id = str(controller_item["id"])
     kit_number = STATE.current_inventory_id.strip()
     if not kit_number:
         raise RuntimeError("Enter a kit number before saving.")
@@ -800,11 +1074,31 @@ def record_current_test() -> dict[str, Any]:
     editing_kit = STATE.editing_inventory_id.strip()
     if kit_number in get_used_kit_numbers(excluding=editing_kit):
         raise RuntimeError(f"Kit number {kit_number} has already been saved in this batch.")
-    if board_test_has_run():
-        STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+    effective_checklist = build_checklist_state(active_template, STATE.checklist_state)
+    if arduino_test_is_selected() or saved_board_test_available_for_edit():
+        effective_checklist[controller_item_id] = True
+    controller_checked = bool(effective_checklist.get(controller_item_id, False))
+    controller_tested = board_test_has_run() or saved_board_test_available_for_edit()
+    if controller_checked and not controller_tested:
+        raise RuntimeError("The BLE Sense board is marked present but has not been tested yet.")
     summary = get_summary()
-    missing_items = [item for item, present in STATE.checklist_state.items() if not present]
-    board_hardware_id = get_current_board_hardware_id()
+    template_items = {str(item["id"]): item for item in active_template["items"]}
+    missing_critical_items = [
+        item["label"]
+        for item_id, item in template_items.items()
+        if item["severity"] == "critical" and not effective_checklist.get(item_id, False)
+    ]
+    missing_standard_items = [
+        item["label"]
+        for item_id, item in template_items.items()
+        if item["severity"] == "missing" and not effective_checklist.get(item_id, False)
+    ]
+    missing_optional_items = [
+        item["label"]
+        for item_id, item in template_items.items()
+        if item["severity"] == "optional" and not effective_checklist.get(item_id, False)
+    ]
+    board_hardware_id = get_current_board_hardware_id() or STATE.editing_saved_board_uid
     duplicate_hardware_record = find_record_by_hardware_id(board_hardware_id, excluding_inventory_id=editing_kit)
     if duplicate_hardware_record:
         duplicate_kit = str(duplicate_hardware_record.get("inventory_id") or "another kit").strip()
@@ -813,19 +1107,24 @@ def record_current_test() -> dict[str, Any]:
         "tested_at": now_iso(),
         "inventory_id": kit_number,
         "inventory_name": STATE.current_inventory_name.strip(),
+        "kit_template_id": active_template["id"],
+        "kit_template_name": active_template["name"],
         "board_uid": board_hardware_id,
         "operator": STATE.current_operator.strip(),
         "port": STATE.connected_port or "",
         "revision": STATE.detected_revision or "",
-        "result": classify_result(summary, STATE.checklist_state),
+        "result": classify_result(summary, effective_checklist, active_template, controller_checked, controller_tested),
         "ok_count": summary.get("ok", 0),
         "needs_action_count": summary.get("needs-action", 0),
         "problem_count": summary.get("problem", 0),
         "waiting_count": summary.get("waiting", 0),
-        "missing_items": missing_items,
+        "missing_critical_items": missing_critical_items,
+        "missing_standard_items": missing_standard_items,
+        "missing_optional_items": missing_optional_items,
         "notes": STATE.notes.strip(),
         "summary": summary,
-        "checklist": dict(STATE.checklist_state),
+        "checklist": effective_checklist,
+        "items": active_template["items"],
         "last_snapshot": STATE.last_snapshot,
         "sensors": {
             definition["key"]: {
@@ -846,6 +1145,7 @@ def record_current_test() -> dict[str, Any]:
         STATE.test_history.pop(existing_index)
         STATE.test_history.append(record)
         STATE.editing_inventory_id = ""
+        STATE.editing_saved_board_uid = ""
     else:
         STATE.test_history.append(record)
     persist_history()
@@ -855,6 +1155,26 @@ def record_current_test() -> dict[str, Any]:
         "info",
         f"{action} result for {kit_label} in {RESULTS_JSON} and {RESULTS_CSV}.",
     )
+    return record
+
+
+def delete_saved_result(inventory_id: str) -> dict[str, Any]:
+    kit_number = inventory_id.strip()
+    if not kit_number:
+        raise RuntimeError("Choose a saved result to delete.")
+    existing_index = next(
+        (index for index, row in enumerate(STATE.test_history) if str(row.get("inventory_id") or "").strip() == kit_number),
+        None,
+    )
+    if existing_index is None:
+        raise RuntimeError(f"Kit number {kit_number} was not found in the saved results.")
+    record = STATE.test_history.pop(existing_index)
+    persist_history()
+    if STATE.editing_inventory_id.strip() == kit_number:
+        disconnect_serial()
+        reset_current_kit()
+    STATE.set_command_result(f"Deleted saved result for kit {kit_number}.")
+    STATE.log("info", f"Deleted saved result for kit {kit_number} from {RESULTS_JSON} and {RESULTS_CSV}.")
     return record
 
 
@@ -872,8 +1192,11 @@ def get_status_payload() -> dict[str, Any]:
     ports = list_serial_ports()
     with STATE.lock:
         STATE.ports = ports
-        if board_test_has_run():
-            STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+        active_template = get_active_template()
+        controller_item = get_controller_item(active_template)
+        controller_item_id = str(controller_item["id"])
+        if arduino_test_is_selected():
+            STATE.checklist_state[controller_item_id] = True
         board_hardware_id = get_current_board_hardware_id()
         return {
             "app": {
@@ -896,6 +1219,7 @@ def get_status_payload() -> dict[str, Any]:
             "ports": ports,
             "connectedPort": STATE.connected_port,
             "detectedRevision": STATE.detected_revision,
+            "revisionOverride": STATE.revision_override,
             "serialConnected": STATE.connected_port is not None,
             "serialError": STATE.serial_error,
             "snapshotCount": STATE.snapshot_count,
@@ -910,10 +1234,13 @@ def get_status_payload() -> dict[str, Any]:
             "historyCount": len(STATE.test_history),
             "usedKitNumbers": sorted(get_used_kit_numbers(), key=lambda value: (0, int(value)) if value.isdigit() else (1, value)),
             "editingInventoryId": STATE.editing_inventory_id,
+            "activeKitTemplateId": active_template["id"],
+            "kitTemplates": STATE.kit_templates,
             "historyFiles": {
                 "json": str(RESULTS_JSON),
                 "csv": str(RESULTS_CSV),
                 "metadata": str(TEST_METADATA_JSON),
+                "kitTemplates": str(KIT_TEMPLATES_JSON),
             },
             "testMetadata": {
                 **STATE.test_metadata,
@@ -925,15 +1252,17 @@ def get_status_payload() -> dict[str, Any]:
                 "inventoryName": STATE.current_inventory_name,
                 "operator": STATE.current_operator,
                 "notes": STATE.notes,
+                "kitTemplateId": active_template["id"],
                 "checklist": [
                     {
-                        "label": item,
-                        "present": STATE.checklist_state.get(item, False),
-                        "detail": f"Hardware ID: {board_hardware_id}" if item == ARDUINO_CHECKLIST_ITEM and board_hardware_id else "",
-                        "autoPresent": item == ARDUINO_CHECKLIST_ITEM and board_test_has_run(),
-                        "key": "arduino" if item == ARDUINO_CHECKLIST_ITEM else "",
+                        **item,
+                        "present": STATE.checklist_state.get(str(item["id"]), False),
+                        "detail": get_arduino_checklist_detail(board_hardware_id) if item["id"] == controller_item_id else "",
+                        "autoPresent": item["id"] == controller_item_id and arduino_test_is_selected(),
+                        "testCompleted": item["id"] == controller_item_id and board_test_has_run(),
+                        "key": "arduino" if item["id"] == controller_item_id else "",
                     }
-                    for item in KIT_CHECKLIST
+                    for item in active_template["items"]
                 ],
             },
             "sensors": [
@@ -1039,12 +1368,35 @@ class ApiHandler(SimpleHTTPRequestHandler):
                 port = str(payload.get("port") or "")
                 if not port:
                     raise RuntimeError("Select a serial port first.")
+                request_arduino_test()
                 self.run_task("Preparing, uploading and connecting", lambda: self.handle_full_test(port))
                 self.send_json({"ok": True, "message": STATE.command_result})
+                return
+            if parsed.path == "/api/request-arduino-test":
+                request_arduino_test()
+                self.send_json({"ok": True, "message": "Arduino test selected for this kit."})
                 return
             if parsed.path == "/api/set-session":
                 self.handle_set_session(payload)
                 self.send_json({"ok": True, "message": "Session details saved."})
+                return
+            if parsed.path == "/api/templates/select":
+                template_id = str(payload.get("templateId") or "").strip()
+                template = set_active_template(template_id)
+                reset_current_kit()
+                STATE.set_command_result(f"Selected kit set '{template['name']}'.")
+                self.send_json({"ok": True, "message": STATE.command_result, "template": template})
+                return
+            if parsed.path == "/api/templates/save":
+                template = save_template(payload)
+                reset_current_kit()
+                self.send_json({"ok": True, "message": STATE.command_result, "template": template})
+                return
+            if parsed.path == "/api/templates/delete":
+                template_id = str(payload.get("templateId") or "").strip()
+                delete_template(template_id)
+                reset_current_kit()
+                self.send_json({"ok": True, "message": STATE.command_result})
                 return
             if parsed.path == "/api/set-test-metadata":
                 metadata = save_test_metadata(payload)
@@ -1066,10 +1418,19 @@ class ApiHandler(SimpleHTTPRequestHandler):
                 record = load_test_for_update(inventory_id)
                 self.send_json({"ok": True, "message": STATE.command_result, "record": record})
                 return
+            if parsed.path == "/api/delete-result":
+                inventory_id = str(payload.get("inventoryId") or "").strip()
+                record = delete_saved_result(inventory_id)
+                self.send_json({"ok": True, "message": STATE.command_result, "record": record})
+                return
             if parsed.path == "/api/reset-for-next":
                 disconnect_serial()
                 reset_current_kit()
                 STATE.set_command_result("Current kit data cleared.")
+                self.send_json({"ok": True, "message": STATE.command_result})
+                return
+            if parsed.path == "/api/reset-arduino-test":
+                reset_arduino_test_flag()
                 self.send_json({"ok": True, "message": STATE.command_result})
                 return
             self.send_json({"ok": False, "error": "Unknown endpoint."}, status=HTTPStatus.NOT_FOUND)
@@ -1085,13 +1446,18 @@ class ApiHandler(SimpleHTTPRequestHandler):
             STATE.set_busy(False, "Idle")
 
     def handle_setup(self) -> None:
-        revision = detect_board_revision(None)
+        revision = get_effective_revision(None)
         ensure_arduino_dependencies(revision)
         STATE.detected_revision = revision
         STATE.setup_result = f"Arduino core and {revision.upper()} libraries are ready."
         STATE.set_command_result(STATE.setup_result)
 
     def handle_set_session(self, payload: dict[str, Any]) -> None:
+        template_id = str(payload.get("kitTemplateId") or STATE.active_template_id or "").strip()
+        if template_id:
+            set_active_template(template_id)
+        active_template = get_active_template()
+        controller_item_id = get_controller_item_id(active_template)
         kit_number = str(payload.get("inventoryId") or "").strip()
         if kit_number and (not kit_number.isdigit() or len(kit_number) > 4):
             raise RuntimeError("Kit number must be 1 to 4 digits.")
@@ -1099,15 +1465,21 @@ class ApiHandler(SimpleHTTPRequestHandler):
         STATE.current_inventory_name = str(payload.get("inventoryName") or "").strip()
         STATE.current_operator = str(payload.get("operator") or "").strip()
         STATE.notes = str(payload.get("notes") or "").strip()
+        revision_override = str(payload.get("revisionOverride") or "auto").strip().lower()
+        if revision_override not in {"auto", "rev1", "rev2"}:
+            raise RuntimeError("Revision override must be Auto, Rev1 or Rev2.")
+        STATE.revision_override = revision_override
         checklist = payload.get("checklist") or {}
+        STATE.checklist_state = build_checklist_state(active_template, STATE.checklist_state)
         if isinstance(checklist, dict):
-            for item in KIT_CHECKLIST:
-                if item == ARDUINO_CHECKLIST_ITEM and not board_test_has_run():
-                    STATE.checklist_state[item] = False
+            for item in active_template["items"]:
+                item_id = str(item["id"])
+                if item_id == controller_item_id and not arduino_test_is_selected():
+                    STATE.checklist_state[item_id] = False
                     continue
-                STATE.checklist_state[item] = bool(checklist.get(item, False))
-        if board_test_has_run():
-            STATE.checklist_state[ARDUINO_CHECKLIST_ITEM] = True
+                STATE.checklist_state[item_id] = bool(checklist.get(item_id, False))
+        if arduino_test_is_selected():
+            STATE.checklist_state[controller_item_id] = True
 
     def install_pyserial(self) -> str:
         STATE.set_busy(True, "Installing pyserial")
@@ -1122,7 +1494,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
             STATE.set_busy(False, "Idle")
 
     def handle_upload(self, port: str) -> None:
-        revision = detect_board_revision(port)
+        revision = get_effective_revision(port)
         STATE.detected_revision = revision
         ensure_arduino_dependencies(revision)
         result = compile_and_upload(port, revision)
@@ -1130,7 +1502,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
         STATE.set_command_result(result)
 
     def handle_full_test(self, port: str) -> None:
-        revision = detect_board_revision(port)
+        revision = get_effective_revision(port)
         STATE.detected_revision = revision
         ensure_arduino_dependencies(revision)
         STATE.setup_result = f"Arduino core and {revision.upper()} libraries are ready."
@@ -1145,6 +1517,9 @@ class ApiHandler(SimpleHTTPRequestHandler):
 
 def main() -> None:
     ensure_data_dir()
+    STATE.kit_templates = load_kit_templates()
+    STATE.active_template_id = STATE.kit_templates[0]["id"]
+    STATE.checklist_state = build_checklist_state(get_active_template())
     STATE.test_history = load_test_history()
     STATE.test_metadata = load_test_metadata()
     STATE.log("info", "BLE Sense Test Station starting.")
