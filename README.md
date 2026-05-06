@@ -6,7 +6,7 @@ This repository is now arranged so a teaching assistant can start one local tool
 
 ## Intended flow
 
-1. Clone the repository to the machine you want to use in the lab.
+1. Clone the repository to the machine you want to use in the lab, or download the ZIP from GitHub's `Code` dropdown and extract it.
 2. Start the launcher:
    - Windows: `LaunchSensorTableMonitor.cmd`
    - macOS: `LaunchSensorTableMonitor.command`
