@@ -1,6 +1,7 @@
 #include <Arduino_APDS9960.h>
 #include <Arduino_LPS22HB.h>
 #include <PDM.h>
+#include <nrf.h>
 
 #if defined(BLE_SENSE_REV2)
   #include <Arduino_BMI270_BMM150.h>
@@ -46,8 +47,15 @@ bool hasBaro = false;
 bool hasIMU = false;
 bool hasAPDS = false;
 bool hasMic = false;
+char boardUid[17] = {0};
 
 unsigned long lastPublishAt = 0;
+}
+
+void loadBoardUid() {
+  uint32_t id0 = NRF_FICR->DEVICEID[0];
+  uint32_t id1 = NRF_FICR->DEVICEID[1];
+  snprintf(boardUid, sizeof(boardUid), "%08lX%08lX", static_cast<unsigned long>(id1), static_cast<unsigned long>(id0));
 }
 
 void onPDMdata() {
@@ -176,7 +184,9 @@ void publishSnapshot() {
     audioPercent = (localAudioPeak * 100.0f) / 32767.0f;
   }
 
-  Serial.print("{\"temp_c\":");
+  Serial.print("{\"board_uid\":\"");
+  Serial.print(boardUid);
+  Serial.print("\",\"temp_c\":");
   printFloatOrNull(lastTemperatureC, 2);
   Serial.print(",\"humidity_pct\":");
   printFloatOrNull(lastHumidity, 2);
@@ -219,6 +229,7 @@ void publishSnapshot() {
 
 void setup() {
   Serial.begin(115200);
+  loadBoardUid();
 
 #if defined(BLE_SENSE_REV2)
   hasHTS = HS300x.begin();

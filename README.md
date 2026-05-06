@@ -1,6 +1,6 @@
 # BLE Sense Test Station
 
-Version: `1.2`
+Version: `1.3`
 
 This repository is now arranged so a teaching assistant can start one local tool instead of juggling Arduino IDE, Arduino CLI and a browser serial session.
 
@@ -24,7 +24,8 @@ This repository is now arranged so a teaching assistant can start one local tool
 6. Tick the kit checklist items that are present.
 7. Plug in an Arduino Nano 33 BLE Sense and choose the detected serial port.
 8. Tick the BLE Sense checklist row if that board belongs to the kit and should be tested.
-9. Click `Run test and save results`.
+9. Click `Run Test`.
+10. When the board has streamed sensor data, click `Save Results`.
 
 The local runner will:
 
@@ -35,6 +36,7 @@ The local runner will:
 - only install missing Arduino dependencies when required
 - use the `PDM` support that comes with the Nano 33 BLE core instead of trying to install it as a separate library
 - compile and upload `sense_table_stream`
+- close any existing serial connection before re-uploading, so changing Rev1/Rev2 can be retried without unplugging the board
 - reconnect to the board and read live JSON sensor data
 - automatically check the Arduino checklist row once the Arduino test has run
 - save the board hardware ID when the board or serial port exposes one
@@ -42,7 +44,7 @@ The local runner will:
 - show which sensors are verified, which need interaction, and which appear broken
 - save the kit result to local JSON and CSV reports
 
-You can also click `Test Arduino` to run only the Arduino upload/connect test without saving the kit result.
+You can also click `Test Board` to run only the Arduino upload/connect test without saving the kit result.
 
 The `Reset` button clears the current kit details, checklist, live sensor state and edit state. It does not delete previously saved result files.
 
@@ -80,6 +82,8 @@ Saved kit results now include:
 - grouped missing items by severity
 - the BLE Sense board hardware ID when available
 - sensor summary and detailed sensor readings
+
+The `Saved Results` section shows the latest saved boards in the main test page. Use `Summarise Results` to open a separate summary page while testing continues. The summary page lists all saved boards, totals the missing kit items across the batch, and includes a `Print / Save PDF` button for a cleaner printed or PDF report.
 
 ## What the status colors mean
 

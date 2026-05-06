@@ -34,7 +34,7 @@ TEST_METADATA_JSON = DATA_DIR / "test_metadata.json"
 KIT_TEMPLATES_JSON = DATA_DIR / "kit_templates.json"
 HOST = "127.0.0.1"
 PORT = 8765
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 
 BOARD_PROFILE = {
     "id": "nano33ble",
@@ -1187,6 +1187,27 @@ def get_history_summary() -> dict[str, int]:
     return summary
 
 
+def get_results_summary_payload() -> dict[str, Any]:
+    with STATE.lock:
+        return {
+            "app": {
+                "title": "BLE Sense Test Station",
+                "version": APP_VERSION,
+                "root": str(ROOT),
+            },
+            "generatedAt": now_iso(),
+            "testMetadata": STATE.test_metadata,
+            "historySummary": get_history_summary(),
+            "historyFiles": {
+                "json": str(RESULTS_JSON),
+                "csv": str(RESULTS_CSV),
+                "metadata": str(TEST_METADATA_JSON),
+                "kitTemplates": str(KIT_TEMPLATES_JSON),
+            },
+            "records": list(STATE.test_history),
+        }
+
+
 def get_status_payload() -> dict[str, Any]:
     install_help = get_install_help()
     ports = list_serial_ports()
@@ -1315,6 +1336,9 @@ class ApiHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/status":
             self.send_json(get_status_payload())
             return
+        if parsed.path == "/api/results-summary":
+            self.send_json(get_results_summary_payload())
+            return
         if parsed.path == "/api/check-kit-number":
             query = urlparse(self.path).query
             kit_number = ""
@@ -1337,6 +1361,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
         try:
             payload = self.read_json_body()
             if parsed.path == "/api/setup":
+                self.apply_revision_override(payload)
                 self.run_task("Preparing Arduino toolchain", self.handle_setup)
                 self.send_json({"ok": True, "message": STATE.setup_result})
                 return
@@ -1361,6 +1386,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
                 port = str(payload.get("port") or "")
                 if not port:
                     raise RuntimeError("Select a serial port first.")
+                self.apply_revision_override(payload)
                 self.run_task("Compiling and uploading", lambda: self.handle_upload(port))
                 self.send_json({"ok": True, "message": STATE.upload_result})
                 return
@@ -1369,6 +1395,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
                 if not port:
                     raise RuntimeError("Select a serial port first.")
                 request_arduino_test()
+                self.apply_revision_override(payload)
                 self.run_task("Preparing, uploading and connecting", lambda: self.handle_full_test(port))
                 self.send_json({"ok": True, "message": STATE.command_result})
                 return
@@ -1445,6 +1472,14 @@ class ApiHandler(SimpleHTTPRequestHandler):
         finally:
             STATE.set_busy(False, "Idle")
 
+    def apply_revision_override(self, payload: dict[str, Any]) -> None:
+        if "revisionOverride" not in payload:
+            return
+        revision_override = str(payload.get("revisionOverride") or "auto").strip().lower()
+        if revision_override not in {"auto", "rev1", "rev2"}:
+            raise RuntimeError("Revision override must be Auto, Rev1 or Rev2.")
+        STATE.revision_override = revision_override
+
     def handle_setup(self) -> None:
         revision = get_effective_revision(None)
         ensure_arduino_dependencies(revision)
@@ -1496,6 +1531,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
     def handle_upload(self, port: str) -> None:
         revision = get_effective_revision(port)
         STATE.detected_revision = revision
+        disconnect_serial()
         ensure_arduino_dependencies(revision)
         result = compile_and_upload(port, revision)
         STATE.upload_result = result
@@ -1504,6 +1540,7 @@ class ApiHandler(SimpleHTTPRequestHandler):
     def handle_full_test(self, port: str) -> None:
         revision = get_effective_revision(port)
         STATE.detected_revision = revision
+        disconnect_serial()
         ensure_arduino_dependencies(revision)
         STATE.setup_result = f"Arduino core and {revision.upper()} libraries are ready."
         upload_result = compile_and_upload(port, revision)

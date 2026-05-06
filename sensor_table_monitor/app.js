@@ -107,7 +107,12 @@ function severityLabel(severity) {
 }
 
 function setStatus(message, tone = "info") {
-  statusText.textContent = message;
+  const statusMessage = statusText.querySelector("span");
+  if (statusMessage) {
+    statusMessage.textContent = message;
+  } else {
+    statusText.textContent = `Status: ${message}`;
+  }
   statusText.classList.toggle("status-warning", tone === "warning");
   statusText.classList.toggle("status-error", tone === "error");
 }
@@ -115,6 +120,17 @@ function setStatus(message, tone = "info") {
 function displayValue(value) {
   const text = `${value || ""}`.trim();
   return text || "-";
+}
+
+function formatSavedResultTime(value) {
+  const text = `${value || ""}`.trim();
+  if (!text) return { date: "-", time: "" };
+  const [datePart, rawTime = ""] = text.split("T");
+  const timePart = rawTime.slice(0, 5);
+  return {
+    date: datePart || text,
+    time: timePart
+  };
 }
 
 function renderTestMetadata(metadata = {}) {
@@ -370,29 +386,23 @@ function renderChecklist(checklist) {
   bindChecklistInputs();
 }
 
-function formatMissingSummary(row) {
-  const critical = Array.isArray(row.missing_critical_items) ? row.missing_critical_items : [];
-  const standard = Array.isArray(row.missing_standard_items) ? row.missing_standard_items : [];
-  const optional = Array.isArray(row.missing_optional_items) ? row.missing_optional_items : [];
-  const parts = [];
-  if (critical.length) parts.push(`Critical: ${critical.join(", ")}`);
-  if (standard.length) parts.push(`Missing: ${standard.join(", ")}`);
-  if (optional.length) parts.push(`Optional: ${optional.join(", ")}`);
-  return parts.join(" | ") || "-";
-}
-
 function renderRecentTests(rows) {
   recentTestsRows.innerHTML = "";
   rows.slice().reverse().forEach((row) => {
     const tr = document.createElement("tr");
     const inventoryId = row.inventory_id || "";
+    const testedAt = formatSavedResultTime(row.tested_at);
+    const testedAtCell = createElement("td");
+    testedAtCell.append(createElement("span", { className: "table-date", text: testedAt.date }));
+    if (testedAt.time) {
+      testedAtCell.append(createElement("span", { className: "table-time", text: testedAt.time }));
+    }
+    tr.append(testedAtCell);
     [
-      row.tested_at || "",
       inventoryId,
       row.inventory_name || "",
       row.result || "",
-      row.revision || "",
-      formatMissingSummary(row)
+      row.revision || ""
     ].forEach((value) => tr.append(createElement("td", { text: value })));
     const actionCell = document.createElement("td");
     const actions = createElement("div", { className: "table-actions" });
@@ -445,7 +455,10 @@ async function testArduino() {
   sessionDirty = false;
   checklistDirty = false;
   setStatus("Preparing, uploading and connecting.");
-  const result = await callApi("/api/run-full-test", { port: getSelectedPort() });
+  const result = await callApi("/api/run-full-test", {
+    port: getSelectedPort(),
+    revisionOverride: revisionOverrideSelect?.value || "auto"
+  });
   setStatus(result.message);
 }
 
@@ -638,8 +651,11 @@ if (editKitSetsButton) {
 
 setupButton.addEventListener("click", async () => {
   await runAction(async () => {
+    await callApi("/api/set-session", currentSessionPayload());
+    sessionDirty = false;
+    checklistDirty = false;
     setStatus("Preparing Arduino tools.");
-    const result = await callApi("/api/setup");
+    const result = await callApi("/api/setup", { revisionOverride: revisionOverrideSelect?.value || "auto" });
     setStatus(result.message);
   });
 });
@@ -654,8 +670,14 @@ installPyserialButton.addEventListener("click", async () => {
 
 uploadButton.addEventListener("click", async () => {
   await runAction(async () => {
+    await callApi("/api/set-session", currentSessionPayload());
+    sessionDirty = false;
+    checklistDirty = false;
     setStatus("Uploading test sketch.");
-    const result = await callApi("/api/upload", { port: getSelectedPort() });
+    const result = await callApi("/api/upload", {
+      port: getSelectedPort(),
+      revisionOverride: revisionOverrideSelect?.value || "auto"
+    });
     setStatus(result.message);
   });
 });

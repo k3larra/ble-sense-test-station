@@ -119,30 +119,9 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h2>Recent Saved Results</h2>
-        <p>The latest kits recorded in this batch.</p>
-      </div>
-      <table class="sensor-table">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Inventory</th>
-            <th>Name</th>
-            <th>Result</th>
-            <th>Revision</th>
-            <th>Missing kit items</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody id="recentTestsRows"></tbody>
-      </table>
-    </section>
-
-    <section class="panel">
-      <div class="panel-head">
         <h2>Kit Details and Checklist</h2>
-        <p id="statusText">Checking local setup.</p>
       </div>
+      <p id="statusText"><strong>Status:</strong> <span>Checking local setup.</span></p>
       <div class="controls-grid operator-grid kit-details-grid">
         <label class="field">
           <span>Kit number</span>
@@ -247,6 +226,29 @@
 
     <section class="panel">
       <div class="panel-head">
+        <div>
+          <h2>Saved Results</h2>
+          <p>The latest kits recorded in this batch.</p>
+        </div>
+        <a class="button-link" href="./results_summary.html" target="_blank" rel="noopener">Summarise Results</a>
+      </div>
+      <table class="sensor-table compact-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Inventory</th>
+            <th>Name</th>
+            <th>Result</th>
+            <th>Revision</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="recentTestsRows"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
         <h2>Activity Log</h2>
         <p>Recent actions and errors from the local runner.</p>
       </div>
@@ -268,6 +270,6 @@
     </form>
   </dialog>
 
-  <script type="module" src="./app.js?v=20260422-1"></script>
+  <script type="module" src="./app.js?v=20260506-1"></script>
 </body>
 </html>

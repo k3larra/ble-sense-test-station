@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test Results Summary</title>
+  <link rel="stylesheet" href="./styles.css?v=20260506-2">
+</head>
+<body>
+  <main class="page page-wide">
+    <header class="page-head">
+      <div>
+        <p class="eyebrow">Teaching Kit Check</p>
+        <h1>Test Results Summary</h1>
+        <p class="intro">Saved board results and the total missing kit items for this batch.</p>
+      </div>
+      <div class="inline-actions no-print">
+        <button id="printSummaryButton" type="button" class="primary">Print / Save PDF</button>
+        <button id="refreshSummaryButton" type="button">Refresh</button>
+        <a class="button-link" href="./index.html">Back to Test Station</a>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Test Details</h2>
+        <p id="summaryStatusText" class="no-print">Loading saved results.</p>
+      </div>
+      <div id="resultSummaryCards" class="summary-grid"></div>
+      <div class="metadata-summary report-metadata">
+        <div>
+          <span class="metric-label">Test name</span>
+          <strong id="summaryTestName">-</strong>
+        </div>
+        <div>
+          <span class="metric-label">Test responsible</span>
+          <strong id="summaryResponsible">-</strong>
+        </div>
+        <div>
+          <span class="metric-label">Last refresh</span>
+          <strong id="summaryGeneratedAt">-</strong>
+        </div>
+        <div class="metadata-notes">
+          <span class="metric-label">Notes</span>
+          <p id="summaryNotes">-</p>
+        </div>
+      </div>
+      <div class="file-list small print-muted">
+        <div>JSON report: <code id="summaryJsonPath">-</code></div>
+        <div>CSV report: <code id="summaryCsvPath">-</code></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Boards</h2>
+        <p id="boardCountText">No saved boards yet.</p>
+      </div>
+      <table class="sensor-table report-table">
+        <thead>
+          <tr>
+            <th>Kit</th>
+            <th>Name</th>
+            <th>Result</th>
+            <th>Revision</th>
+            <th>Missing Items</th>
+            <th>Tested</th>
+          </tr>
+        </thead>
+        <tbody id="boardRows"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Missing Items To Buy</h2>
+        <p id="missingCountText">No missing items recorded.</p>
+      </div>
+      <table class="sensor-table report-table">
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Total Missing</th>
+            <th>Severity</th>
+            <th>Kits</th>
+          </tr>
+        </thead>
+        <tbody id="missingRows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script type="module" src="./results_summary.js?v=20260506-1"></script>
+</body>
+</html>
